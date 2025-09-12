@@ -7,7 +7,7 @@ This simple Python project implements an audio listener, which passes 3-second c
 
 It is intended as a tool which can simplify access to the BirdNET model for Python developers. It has been tested on a Raspberry Pi Zero 2, with analysis of a 3-second file typically taking under 0.8s.
 
-The code does not store or any captured audio beyond the time it takes to analyze, and does not send any captured audio anywhere.
+The code does not store any captured audio beyond the time it takes to analyze, and does not send any captured audio anywhere.
 
 ## Installation
 
@@ -81,6 +81,7 @@ This project includes two *unmodified* files from the [BirdNET-Lite](https://git
 - `birdnet/labels_en.txt`  
 
 These files are provided under the terms of the [CC BY-NC-SA 4.0 licence](https://creativecommons.org/licenses/by-nc-sa/4.0/).  
+
 
 
 
