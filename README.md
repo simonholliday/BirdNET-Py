@@ -37,6 +37,7 @@ from birdnetpy.core import Listener, Detection
 def example_callback (detections:list[Detection]):
 
 	for detection in detections:
+
 		print(detection)
 		print('We detected a %s with a confidence level of %0.2f%%' % (detection.english_name, 100 * detection.confidence))
 
@@ -78,4 +79,5 @@ This project includes two *unmodified* files from the [BirdNET-Lite](https://git
 - `birdnet/labels_en.txt`  
 
 These files are provided under the terms of the [CC BY-NC-SA 4.0 licence](https://creativecommons.org/licenses/by-nc-sa/4.0/).  
+
 
