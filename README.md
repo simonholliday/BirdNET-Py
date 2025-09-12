@@ -9,7 +9,7 @@ It is intended as a tool which can simplify access to the BirdNET model for Pyth
 
 ## Privacy
 
-This code captures audio solely for the purpose of analysis, does not store any captured audio beyond the time it takes to analyze, and does not send any captured audio anywhere. The codebase is small enough that you can verify this very quickly :)
+This code captures audio solely for the purpose of analysis, does not store any captured audio beyond the time it takes to analyze, and does not send any captured audio anywhere. The codebase is small enough that you can verify this yourself very quickly in case of any doubt.
 
 ## Installation
 
@@ -83,6 +83,7 @@ This project includes two *unmodified* files from the [BirdNET-Lite](https://git
 - `birdnet/labels_en.txt`  
 
 These files are provided under the terms of the [CC BY-NC-SA 4.0 licence](https://creativecommons.org/licenses/by-nc-sa/4.0/).  
+
 
 
 
