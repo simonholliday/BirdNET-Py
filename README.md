@@ -84,8 +84,6 @@ This project includes two *unmodified* files from the [BirdNET-Lite](https://git
 
 These files are provided under the terms of the [CC BY-NC-SA 4.0 licence](https://creativecommons.org/licenses/by-nc-sa/4.0/).  
 
+## Disclaimer
 
-
-
-
-
+BirdNET-Py uses the BirdNET-Lite model for automatic bird sound detection. Like all machine learning tools, it may not always provide perfectly accurate results, so please use detections as a helpful guide rather than definitive proof. This project is intended for experimentation and development, and no warranty or guarantee of accuracy is provided.

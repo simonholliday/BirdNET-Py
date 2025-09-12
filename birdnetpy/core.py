@@ -40,7 +40,7 @@ class Listener:
 		label_file_path = module_dir + '/birdnet/labels_en.txt'
 		# non_bird_label_file_path = module_dir + '/labels_not_birds.txt'
 
-		self.sample_rate_hz = 48000
+		self.sample_rate_hz = 48000 # The BirdNET model is trained with 48kHz files
 
 		self.match_threshold = match_threshold
 		self.silence_threshold_dbfs = silence_threshold_dbfs
