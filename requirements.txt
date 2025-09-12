@@ -1,0 +1,4 @@
+librosa
+numpy<2
+pyaudio
+tflite-runtime
