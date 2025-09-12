@@ -1,3 +1,5 @@
+[![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
+
 # BirdNET-Py
 
 **A lightweight async audio listener and BirdNET analysis pipeline for development and experimentation.**
@@ -77,3 +79,4 @@ This project includes two *unmodified* files from the [BirdNET-Lite](https://git
 - `birdnet/labels_en.txt`  
 
 These files are provided under the terms of the [CC BY-NC-SA 4.0 licence](https://creativecommons.org/licenses/by-nc-sa/4.0/).  
+
