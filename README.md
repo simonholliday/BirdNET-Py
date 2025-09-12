@@ -58,7 +58,7 @@ if __name__ == '__main__':
 
 ### Detections
 
-The *Detections* object is a namedtuple defined as follows:
+The *Detection* object is a namedtuple defined as follows:
 
 ```
 Detection = collections.namedtuple('Detection', ['index', 'english_name', 'latin_name', 'confidence'])
@@ -78,3 +78,4 @@ This project includes two *unmodified* files from the [BirdNET-Lite](https://git
 - `birdnet/labels_en.txt`  
 
 These files are provided under the terms of the [CC BY-NC-SA 4.0 licence](https://creativecommons.org/licenses/by-nc-sa/4.0/).  
+
