@@ -9,7 +9,7 @@ import tflite_runtime.interpreter
 import time
 
 logging.basicConfig (
-	level = logging.DEBUG, # DEBUG, INFO, WARNING, ERROR, CRITICAL
+	level = logging.INFO, # DEBUG, INFO, WARNING, ERROR, CRITICAL
 	handlers = [
 		logging.StreamHandler()
 	],
@@ -206,7 +206,7 @@ class Listener:
 
 				peak_dbfs = self.get_dbfs_peak(analysis_buffer)
 
-				logger.debug('Peak dBFS: %0.2f', peak_dbfs)
+				# logger.debug('Peak dBFS: %0.2f', peak_dbfs)
 
 				if self.silence_threshold_dbfs and (peak_dbfs < self.silence_threshold_dbfs):
 					# Peak audio is below threshold
