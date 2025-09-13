@@ -9,7 +9,7 @@ It uses asyncio for efficient, non-blocking audio capture and offloads the CPU-i
 
 If an audio output directory is specified, the 3-second analysis buffer is saved to a 16-bit WAV file whenever a positive detection is made. The full file path is then passed to the callback function.
 
-It is intended as a tool to simplify access to the BirdNET model for Python developers. It has been tested on a Raspberry Pi Zero 2 W, with analysis of a 3-second file typically taking under 0.8 seconds.
+It is intended as a tool to simplify access to the BirdNET model for Python developers. The code is highly optimized to ensure reliable, uninterrupted audio streaming even on devices like the Raspberry Pi Zero 2. On this hardware, analysis of a 3-second audio file is typically completed in under 0.8 seconds.
 
 Privacy Note: Users should be respectful of privacy. If the `is_human` property is `True` in any detections, the corresponding audio file may contain human speech.
 
