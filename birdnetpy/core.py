@@ -2,11 +2,13 @@ import asyncio
 import collections
 import logging
 import numpy
+import os
 import pathlib
 import sounddevice
 import sys
 import tflite_runtime.interpreter
 import time
+import wave
 
 logging.basicConfig (
 	level = logging.INFO, # DEBUG, INFO, WARNING, ERROR, CRITICAL
@@ -18,16 +20,17 @@ logging.basicConfig (
 
 logger = logging.getLogger(__name__)
 
-Detection = collections.namedtuple('Detection', ['index', 'english_name', 'latin_name', 'confidence'])
+Detection = collections.namedtuple('Detection', ['index', 'english_name', 'latin_name', 'is_bird', 'is_human', 'confidence'])
 
 class Listener:
 
-	def __init__ (self, match_threshold:float=0.75, silence_threshold_dbfs:float=None, callback_function:object=None):
+	def __init__ (self, match_threshold:float=0.75, silence_threshold_dbfs:float=None, callback_function:object=None, audio_output_dir:str=None):
 
 		"""
 		match_threshold: The lowest confidence level we want to see matches for (between 0 and 1).
 		silence_threshold_dbfs: If defined, we will check whether there is any signal in the sampled audio which exceeds this level, and if not, it will not be passed to the BirdNET model (a value in dBFS e.g. -60).
-		callback_function: This function will be called any time one or more bird is detected in an audio chunk. It should accept a list of Detection objects as its argument.
+		callback_function: This function will be called any time one or more bird is detected in an audio chunk. It should accept a list of Detection objects and a wav file path as its arguments.
+		audio_output_dir: A directory to store audio when there are detections, or None if we do not want to keep the audio.
 		"""
 
 		buffer_size_s = 1
@@ -38,13 +41,29 @@ class Listener:
 
 		tflite_file_path = module_dir + '/birdnet/BirdNET_GLOBAL_6K_V2.4_Model_FP16.tflite'
 		label_file_path = module_dir + '/birdnet/labels_en.txt'
-		# non_bird_label_file_path = module_dir + '/labels_not_birds.txt'
+		non_bird_label_file_path = module_dir + '/labels_not_birds.txt'
 
 		self.sample_rate_hz = 48000 # The BirdNET model is trained with 48kHz files
 
 		self.match_threshold = match_threshold
 		self.silence_threshold_dbfs = silence_threshold_dbfs
 		self.callback_function = callback_function
+
+		self.audio_output_dir = None
+
+		if audio_output_dir:
+
+			audio_output_dir = audio_output_dir.rstrip('/\\')
+
+			if not os.path.isdir(audio_output_dir):
+				logger.critical('Audio output directory does not exist: %s' % (audio_output_dir))
+				sys.exit(1)
+
+			if not os.access(audio_output_dir, os.W_OK):
+				logger.critical('Audio output directory is not writeable: %s' % (audio_output_dir))
+				sys.exit(1)
+
+			self.audio_output_dir = audio_output_dir
 
 		# No more configurable items
 
@@ -55,7 +74,7 @@ class Listener:
 
 		self.buffer_samples = int(buffer_size_s * self.sample_rate_hz)
 
-		if not self._load_model(tflite_file_path) or not self._load_labels(label_file_path):
+		if not self._load_model(tflite_file_path) or not self._load_labels(label_file_path, non_bird_label_file_path):
 
 			logger.critical('Setup failed')
 			sys.exit(1)
@@ -80,20 +99,33 @@ class Listener:
 
 		return False
 
-	def _load_labels (self, file_path:str):
+	def _load_labels (self, label_file_path:str, non_bird_label_label_file_path:str):
 
 		logger.info('Loading labels')
 
 		try:
 
+			non_bird_labels = set()
+
+			with open(non_bird_label_label_file_path, 'r', encoding='utf-8') as f:
+
+				for _, line in enumerate(f):
+					non_bird_labels.add(line.strip())
+
 			self.labels = {}
 
-			with open(file_path, 'r', encoding='utf-8') as f:
+			with open(label_file_path, 'r', encoding='utf-8') as f:
 
 				for idx, line in enumerate(f):
 
+					line = line.strip()
+
 					latin_name, english_name = line.strip().split('_', 1)
-					self.labels[idx] = (latin_name, english_name)
+
+					is_bird = line not in non_bird_labels
+					is_human = line.startswith('Human ')
+
+					self.labels[idx] = (latin_name, english_name, is_bird, is_human)
 
 			return True
 
@@ -127,11 +159,26 @@ class Listener:
 
 		return dbfs
 
-	async def birdcatcher (self, chunk:numpy.ndarray):
+	def save_wav (self, file_path:str, analysis_buffer:numpy.ndarray, samplerate:int=48000):
+
+		# Convert float32 [-1.0, 1.0] to int16
+		audio_int16 = numpy.clip(analysis_buffer * 32767, -32768, 32767).astype('<i2')
+
+		logger.debug('Writing audio file %s' % (file_path))
+
+		with wave.open(file_path, 'wb') as wf:
+
+			wf.setnchannels(1)
+			wf.setsampwidth(2) # 16-bit PCM
+			wf.setframerate(samplerate)
+
+			wf.writeframes(audio_int16.tobytes())
+
+	def birdcatcher (self, analysis_buffer:numpy.ndarray):
 
 		start_time = time.perf_counter()
 
-		input_data = numpy.expand_dims(chunk, axis=0)
+		input_data = numpy.expand_dims(analysis_buffer, axis=0)
 
 		self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
 		self.interpreter.invoke()
@@ -150,11 +197,18 @@ class Listener:
 
 		for index in indices:
 
-			latin, english = self.labels.get(index, ('Unknown', 'Unknown'))
-			detections.append(Detection(index, english, latin, confidences[index]))
+			latin, english, is_bird, is_human = self.labels.get(index, ('Unknown', 'Unknown', None, None))
+			detections.append(Detection(index, english, latin, is_bird, is_human, confidences[index]))
 
 		if self.callback_function:
-			self.callback_function(detections)
+
+			if self.audio_output_dir:
+				wav_file_path = self.audio_output_dir + '/' + time.strftime('%Y%m%d-%H%M%S') + '.wav'
+				self.save_wav(file_path=wav_file_path, analysis_buffer=analysis_buffer, samplerate=self.sample_rate_hz)
+			else:
+				wav_file_path = None
+
+			self.callback_function(detections, wav_file_path)
 
 		end_time = time.perf_counter()
 
@@ -188,21 +242,24 @@ class Listener:
 
 		try:
 
-			analysis_buffer = numpy.empty(self.window_samples, dtype=numpy.float32)
-			audio_buffer = collections.deque(maxlen = self.window_samples)
+			analysis_buffer = numpy.zeros(self.window_samples, dtype=numpy.float32)
+			samples_since_last_window = 0
 
 			while True:
 
-				chunk = await queue.get()
-				audio_buffer.extend(chunk)
-				samples_since_last_window += len(chunk)
+				chunk_int16 = await queue.get()
+				chunk_float32 = chunk_int16.astype(numpy.float32) / 32768.0
 
-				if samples_since_last_window < self.step_samples or len(audio_buffer) != self.window_samples:
+				analysis_buffer = numpy.roll(analysis_buffer, -self.buffer_samples)
+				analysis_buffer[-self.buffer_samples:] = chunk_float32
+
+				samples_since_last_window += self.buffer_samples
+
+				if samples_since_last_window < self.step_samples:
 					continue
 
-				analysis_buffer[:] = numpy.array(audio_buffer, dtype=numpy.float32) / 32768.0
-
-				samples_since_last_window = 0
+				# Reset counter for the next analysis window
+				samples_since_last_window -= self.step_samples
 
 				peak_dbfs = self.get_dbfs_peak(analysis_buffer)
 
@@ -213,7 +270,8 @@ class Listener:
 					logger.debug('Ignoring silent chunk')
 					continue
 
-				asyncio.create_task(self.birdcatcher(analysis_buffer.copy()))
+				# asyncio.create_task(self.birdcatcher(analysis_buffer.copy()))
+				loop.run_in_executor(None, self.birdcatcher, analysis_buffer.copy())
 
 		except KeyboardInterrupt:
 

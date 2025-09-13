@@ -1,24 +1,33 @@
 [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
 # BirdNET-Py
 
-**A lightweight async audio listener and BirdNET analysis pipeline for development and experimentation.**
+**A lightweight, asynchronous audio listener and BirdNET analysis pipeline for Python development and experimentation.**
 
-This simple Python project implements an audio listener, which passes 3-second chunks of audio (with a 0.5 second overlap) to be analyzed by the BirdNET-Lite model, which in turn calls a user-defined function with any detections.
+This project provides a simple class that continuously listens to an audio input, passing 3-second chunks of audio (with a 0.5-second overlap) to be analyzed by the BirdNET-Lite model. Detections are returned to a user-defined callback function.
 
-It is intended as a tool which can simplify access to the BirdNET model for Python developers. It has been tested on a Raspberry Pi Zero 2, with analysis of a 3-second file typically taking under 0.8s.
+It uses asyncio for efficient, non-blocking audio capture and offloads the CPU-intensive model inference to a separate thread. This design ensures the audio stream is never interrupted, preventing buffer overflows and lost samples.
+
+If an audio output directory is specified, the 3-second analysis buffer is saved to a 16-bit WAV file whenever a positive detection is made. The full file path is then passed to the callback function.
+
+It is intended as a tool to simplify access to the BirdNET model for Python developers. It has been tested on a Raspberry Pi Zero 2 W, with analysis of a 3-second file typically taking under 0.8 seconds.
+
+Privacy Note: Users should be respectful of privacy. If the `is_human` property is `True` in any detections, the corresponding audio file may contain human speech.
 
 ## Installation
 
-### Dependencies
+### Prerequisites
+
+This project requires Python 3.7+ and the following system package:
 
 ```bash
 sudo apt-get install portaudio19-dev
-pip install -r requirements.txt
 ```
 
-#### requirements.txt
+Important: This project uses a TFLite model that is not compatible with NumPy 2.0 or newer. The requirements.txt file enforces this.
 
-Note that this project (specifically the .tflite model) is not compatible with NumPy 2.
+### Dependencies
+
+The Python dependencies are listed in requirements.txt:
 
 ```
 librosa
@@ -27,23 +36,39 @@ sounddevice
 tflite-runtime
 ```
 
+Install them using `pip`
+
+```bash
+pip install -r requirements.txt
+```
+
 ## Example
+
+This example is included as `example.py` in the repo.
 
 ```python
 import asyncio
+import os
 
 from birdnetpy.core import Listener, Detection
 
-def example_callback (detections:list[Detection]):
+def example_callback (detections:list[Detection], wav_file_path:str=None):
 
 	for detection in detections:
 
 		print(detection)
 		print('We detected a %s with a confidence level of %0.2f%%' % (detection.english_name, 100 * detection.confidence))
 
+	if wav_file_path and os.path.isfile(wav_file_path):
+
+		# The user is responsible for managing the saved WAV files.
+		# In this example, we'll just remove the file to prevent the disk from filling up.
+
+		os.remove(wav_file_path)
+
 async def main ():
 
-	listener = Listener(match_threshold=0.8, silence_threshold_dbfs=-60.0, callback_function=example_callback)
+	listener = Listener(match_threshold=0.8, silence_threshold_dbfs=-60.0, callback_function=example_callback, audio_output_dir='/tmp')
 	await listener.listen()
 
 if __name__ == '__main__':
@@ -55,15 +80,19 @@ if __name__ == '__main__':
 
 - **match_threshold**: The lowest confidence level we want to see matches for (between 0 and 1).
 - **silence_threshold_dbfs**: If defined, we will check whether there is any signal in the sampled audio which exceeds this level, and if not, it will not be passed to the BirdNET model (a value in dBFS e.g. -60).
-- **callback_function**: This function will be called any time one or more bird is detected in an audio chunk. It should accept a list of Detection objects as its argument.
+- **callback_function**: This function will be called any time one or more bird is detected in an audio chunk. It should accept a list of Detection objects and a wav file path as its arguments.
+- **audio_output_dir**: A directory to store audio when there are detections, or None if we do not want to keep the audio.
+
 
 ### Detections
 
-The *Detection* object is a namedtuple defined as follows:
+The *Detection* object is a named tuple defined as follows:
 
 ```
-Detection = collections.namedtuple('Detection', ['index', 'english_name', 'latin_name', 'confidence'])
+Detection = collections.namedtuple('Detection', ['index', 'english_name', 'latin_name', 'is_bird', 'is_human', 'confidence'])
 ```
+
+The BirdNET model contains some non-bird items, and so the additional boolean `is_bird` and `is_human` properties are intended to help with classification.
 
 ## Licence
 
@@ -82,4 +111,4 @@ These files are provided under the terms of the [CC BY-NC-SA 4.0 licence](https:
 
 ## Disclaimer
 
-BirdNET-Py uses the BirdNET-Lite model for automatic bird sound detection. Like all machine learning tools, it may not always provide perfectly accurate results, so please use detections as a helpful guide rather than definitive proof. This project is intended for experimentation and development, and no warranty or guarantee of accuracy is provided.
+BirdNET-Py uses the BirdNET-Lite model for automatic sound detection. Like all machine learning tools, it may not always provide perfectly accurate results, so please use detections as a helpful guide rather than definitive proof. This project is intended for experimentation and development, and no warranty or guarantee of accuracy is provided.
