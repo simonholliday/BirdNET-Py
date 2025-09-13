@@ -17,13 +17,13 @@ Privacy Note: Users should be respectful of privacy. If the `is_human` property 
 
 ### Prerequisites
 
-This project requires Python 3.7+ and the following system package:
+This project requires Python ≥3.7 and <3.12 (due to TensorFlow Lite runtime incompatibility with Python 3.12). The following system package is also required:
 
 ```bash
 sudo apt-get install portaudio19-dev
 ```
 
-Important: This project uses a TFLite model that is not compatible with NumPy 2.0 or newer. The requirements.txt file enforces this.
+This project uses a TFLite model that is not compatible with NumPy 2.0 or newer. The requirements.txt file enforces this.
 
 ### Dependencies
 
@@ -39,6 +39,25 @@ tflite-runtime
 Install them using `pip`
 
 ```bash
+pip install -r requirements.txt
+```
+
+#### Python Versions
+
+At the time of writing, `tflite-runtime` is not available for Python 3.12 or newer. If your system uses Python 3.12+ by default, you can install Python 3.11 alongside it and create a virtual environment for BirdNET-Py:
+
+```bash
+# Install Python 3.11 (Ubuntu example)
+sudo apt install -y software-properties-common
+sudo add-apt-repository ppa:deadsnakes/ppa
+sudo apt update
+sudo apt install -y python3.11 python3.11-venv
+
+# Create and activate a Python 3.11 virtual environment
+python3.11 -m venv birdnetpy
+source birdnetpy/bin/activate
+
+# Now install requirements
 pip install -r requirements.txt
 ```
 
