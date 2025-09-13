@@ -1,7 +1,7 @@
 [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
 # BirdNET-Py
 
-**A lightweight, asynchronous audio listener and BirdNET analysis pipeline for Python development and experimentation.**
+**A lightweight asynchronous audio listener and BirdNET analysis pipeline for Python development and experimentation.**
 
 This project provides a simple class that continuously listens to an audio input, passing 3-second chunks of audio (with a 0.5-second overlap) to be analyzed by the BirdNET-Lite model. Detections are returned to a user-defined callback function.
 

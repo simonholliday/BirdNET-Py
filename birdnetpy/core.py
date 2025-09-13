@@ -36,15 +36,9 @@ class Listener:
 
 		self.lock = threading.Lock()
 
-		buffer_size_s = 1
-		window_size_s = 3.0
+		buffer_size_s = 1 # Optimal for Raspberry Pi Zero 2 without "input overflow" errors.
+		window_size_s = 3.0 # Required for BirdNET
 		overlap_size_s = 0.5
-
-		module_dir = str(pathlib.Path(__file__).parent)
-
-		tflite_file_path = module_dir + '/birdnet/BirdNET_GLOBAL_6K_V2.4_Model_FP16.tflite'
-		label_file_path = module_dir + '/birdnet/labels_en.txt'
-		non_bird_label_file_path = module_dir + '/labels_not_birds.txt'
 
 		self.sample_rate_hz = 48000 # The BirdNET model is trained with 48kHz files
 
@@ -68,14 +62,20 @@ class Listener:
 
 			self.audio_output_dir = audio_output_dir
 
-		# No more configurable items
-
 		self.step_size_s = window_size_s - overlap_size_s
 
 		self.window_samples = int(window_size_s * self.sample_rate_hz)
 		self.step_samples = int(self.step_size_s * self.sample_rate_hz)
 
 		self.buffer_samples = int(buffer_size_s * self.sample_rate_hz)
+
+		# Load model and labels
+
+		module_dir = str(pathlib.Path(__file__).parent)
+
+		tflite_file_path = module_dir + '/birdnet/BirdNET_GLOBAL_6K_V2.4_Model_FP16.tflite'
+		label_file_path = module_dir + '/birdnet/labels_en.txt'
+		non_bird_label_file_path = module_dir + '/labels_not_birds.txt'
 
 		if not self._load_model(tflite_file_path) or not self._load_labels(label_file_path, non_bird_label_file_path):
 
@@ -248,7 +248,6 @@ class Listener:
 		try:
 
 			analysis_buffer = numpy.zeros(self.window_samples, dtype=numpy.float32)
-			samples_since_last_window = 0
 
 			while True:
 
@@ -280,7 +279,7 @@ class Listener:
 
 		except KeyboardInterrupt:
 
-			asyncio.gather(*asyncio.all_tasks(), return_exceptions=True)
+			logger.info('Stopping')
 
 		finally:
 
