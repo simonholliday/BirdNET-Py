@@ -7,6 +7,7 @@ import pathlib
 import sounddevice
 import sys
 import tflite_runtime.interpreter
+import threading
 import time
 import wave
 
@@ -32,6 +33,8 @@ class Listener:
 		callback_function: This function will be called any time one or more bird is detected in an audio chunk. It should accept a list of Detection objects and a wav file path as its arguments.
 		audio_output_dir: A directory to store audio when there are detections, or None if we do not want to keep the audio.
 		"""
+
+		self.lock = threading.Lock()
 
 		buffer_size_s = 1
 		window_size_s = 3.0
@@ -176,43 +179,45 @@ class Listener:
 
 	def birdcatcher (self, analysis_buffer:numpy.ndarray):
 
-		start_time = time.perf_counter()
+		with self.lock:
 
-		input_data = numpy.expand_dims(analysis_buffer, axis=0)
+			start_time = time.perf_counter()
 
-		self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
-		self.interpreter.invoke()
+			input_data = numpy.expand_dims(analysis_buffer, axis=0)
 
-		output_data = self.interpreter.get_tensor(self.output_details[0]['index'])
+			self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
+			self.interpreter.invoke()
 
-		logits = numpy.squeeze(output_data)
-		confidences = self._custom_sigmoid(logits)
+			output_data = self.interpreter.get_tensor(self.output_details[0]['index'])
 
-		indices = numpy.where(confidences >= self.match_threshold)[0]
+			logits = numpy.squeeze(output_data)
+			confidences = self._custom_sigmoid(logits)
 
-		if indices.size < 1:
-			return
+			indices = numpy.where(confidences >= self.match_threshold)[0]
 
-		detections = []
+			if indices.size < 1:
+				return
 
-		for index in indices:
+			detections = []
 
-			latin, english, is_bird, is_human = self.labels.get(index, ('Unknown', 'Unknown', None, None))
-			detections.append(Detection(index, english, latin, is_bird, is_human, confidences[index]))
+			for index in indices:
 
-		if self.callback_function:
+				latin, english, is_bird, is_human = self.labels.get(index, ('Unknown', 'Unknown', None, None))
+				detections.append(Detection(index, english, latin, is_bird, is_human, confidences[index]))
 
-			if self.audio_output_dir:
-				wav_file_path = self.audio_output_dir + '/' + time.strftime('%Y%m%d-%H%M%S') + '.wav'
-				self.save_wav(file_path=wav_file_path, analysis_buffer=analysis_buffer, samplerate=self.sample_rate_hz)
-			else:
-				wav_file_path = None
+			if self.callback_function:
 
-			self.callback_function(detections, wav_file_path)
+				if self.audio_output_dir:
+					wav_file_path = self.audio_output_dir + '/' + time.strftime('%Y%m%d-%H%M%S') + '.wav'
+					self.save_wav(file_path=wav_file_path, analysis_buffer=analysis_buffer, samplerate=self.sample_rate_hz)
+				else:
+					wav_file_path = None
 
-		end_time = time.perf_counter()
+				self.callback_function(detections, wav_file_path)
 
-		logger.debug('Analysis took %0.2f seconds' % (end_time-start_time))
+			end_time = time.perf_counter()
+
+			logger.debug('Analysis took %0.2f seconds' % (end_time-start_time))
 
 	async def listen (self):
 
