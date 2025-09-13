@@ -1,4 +1,4 @@
 librosa
 numpy<2
-pyaudio
+sounddevice
 tflite-runtime

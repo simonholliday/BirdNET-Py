@@ -16,7 +16,7 @@ This code captures audio solely for the purpose of analysis, does not store any 
 ### Dependencies
 
 ```bash
-sudo apt-get install python3-dev portaudio19-dev
+sudo apt-get install portaudio19-dev
 pip install -r requirements.txt
 ```
 
@@ -27,7 +27,7 @@ Note that this project (specifically the .tflite model) is not compatible with N
 ```
 librosa
 numpy<2
-pyaudio
+sounddevice
 tflite-runtime
 ```
 

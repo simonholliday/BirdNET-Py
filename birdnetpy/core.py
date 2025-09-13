@@ -3,7 +3,7 @@ import collections
 import logging
 import numpy
 import pathlib
-import pyaudio
+import sounddevice
 import sys
 import tflite_runtime.interpreter
 import time
@@ -30,7 +30,7 @@ class Listener:
 		callback_function: This function will be called any time one or more bird is detected in an audio chunk. It should accept a list of Detection objects as its argument.
 		"""
 
-		buffer_size_s = 0.5
+		buffer_size_s = 1
 		window_size_s = 3.0
 		overlap_size_s = 0.5
 
@@ -54,7 +54,6 @@ class Listener:
 		self.step_samples = int(self.step_size_s * self.sample_rate_hz)
 
 		self.buffer_samples = int(buffer_size_s * self.sample_rate_hz)
-		self.audio_buffer = collections.deque(maxlen = self.window_samples)
 
 		if not self._load_model(tflite_file_path) or not self._load_labels(label_file_path):
 
@@ -106,7 +105,6 @@ class Listener:
 
 	def _custom_sigmoid (self, x, sensitivity=1.0):
 
-		# I copied this from somewhere, can't remember what it does.
 		return 1 / (1 + numpy.exp(-sensitivity * x))
 
 	def get_dbfs_peak (self, chunk:numpy.ndarray) -> float:
@@ -114,7 +112,7 @@ class Listener:
 		if len(chunk) == 0:
 			return 0.0
 
-		peak = numpy.max(numpy.abs(chunk)) / 32768.0 # For 16-bit
+		peak = numpy.max(numpy.abs(chunk))
 		dbfs = 20 * numpy.log10(peak + 1e-10)
 
 		return dbfs
@@ -124,7 +122,7 @@ class Listener:
 		if len(chunk) == 0:
 			return 0.0
 
-		rms = numpy.sqrt(numpy.mean(chunk**2)) / 32768.0 # For 16-bit
+		rms = numpy.sqrt(numpy.mean(chunk**2))
 		dbfs = 20 * numpy.log10(rms + 1e-10)
 
 		return dbfs
@@ -134,9 +132,6 @@ class Listener:
 		start_time = time.perf_counter()
 
 		input_data = numpy.expand_dims(chunk, axis=0)
-
-		if self.input_type != numpy.float32:
-			input_data = input_data.astype(self.input_type)
 
 		self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
 		self.interpreter.invoke()
@@ -150,9 +145,6 @@ class Listener:
 
 		if indices.size < 1:
 			return
-
-		# Sort descending
-		# indices = indices[numpy.argsort(confidences[indices])[::-1]]
 
 		detections = []
 
@@ -173,24 +165,22 @@ class Listener:
 		loop = asyncio.get_running_loop()
 		queue = asyncio.Queue()
 
-		def callback (in_data, frame_count, time_info, status):
+		def callback (indata, frames, time, status):
 
-			data = numpy.frombuffer(in_data, dtype=numpy.int16).astype(numpy.float32)
-			loop.call_soon_threadsafe(queue.put_nowait, data)
-			return (in_data, pyaudio.paContinue)
+			if status:
+				logger.warning("Sounddevice status: %s" % (status))
 
-		pa = pyaudio.PyAudio()
+			loop.call_soon_threadsafe(queue.put_nowait, indata[:, 0].copy())
 
-		stream = pa.open(
-			format = pyaudio.paInt16,
+		stream = sounddevice.InputStream(
+			samplerate = self.sample_rate_hz,
 			channels = 1,
-			rate = self.sample_rate_hz,
-			input = True,
-			frames_per_buffer = self.buffer_samples,
-			stream_callback = callback
+			dtype = 'int16',
+			blocksize = self.buffer_samples,
+			callback = callback
 		)
 
-		stream.start_stream()
+		stream.start()
 
 		logger.info('Capturing audio...')
 
@@ -198,35 +188,38 @@ class Listener:
 
 		try:
 
+			analysis_buffer = numpy.empty(self.window_samples, dtype=numpy.float32)
+			audio_buffer = collections.deque(maxlen = self.window_samples)
+
 			while True:
 
 				chunk = await queue.get()
-				self.audio_buffer.extend(chunk)
+				audio_buffer.extend(chunk)
 				samples_since_last_window += len(chunk)
 
-				if samples_since_last_window < self.step_samples or len(self.audio_buffer) != self.window_samples:
+				if samples_since_last_window < self.step_samples or len(audio_buffer) != self.window_samples:
 					continue
 
-				chunk = numpy.array(self.audio_buffer, dtype=numpy.float32)
+				analysis_buffer[:] = numpy.array(audio_buffer, dtype=numpy.float32) / 32768.0
+
 				samples_since_last_window = 0
 
-				peak_dbfs = self.get_dbfs_peak(chunk)
+				peak_dbfs = self.get_dbfs_peak(analysis_buffer)
 
-				# logger.debug('Peak dBFS: %0.2f', peak_dbfs)
+				logger.debug('Peak dBFS: %0.2f', peak_dbfs)
 
 				if self.silence_threshold_dbfs and (peak_dbfs < self.silence_threshold_dbfs):
 					# Peak audio is below threshold
 					logger.debug('Ignoring silent chunk')
 					continue
 
-				asyncio.create_task(self.birdcatcher(chunk))
+				asyncio.create_task(self.birdcatcher(analysis_buffer.copy()))
 
 		except KeyboardInterrupt:
 
-			pass
+			asyncio.gather(*asyncio.all_tasks(), return_exceptions=True)
 
 		finally:
 
-			stream.stop_stream()
+			stream.stop()
 			stream.close()
-			pa.terminate()
