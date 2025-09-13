@@ -236,12 +236,13 @@ class Listener:
 			channels = 1,
 			dtype = 'int16',
 			blocksize = self.buffer_samples,
+			latency = 'high',
 			callback = callback
 		)
 
 		stream.start()
 
-		logger.info('Capturing audio...')
+		logger.info('Streaming audio...')
 
 		samples_since_last_window = 0
 
