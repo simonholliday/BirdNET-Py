@@ -38,9 +38,9 @@ class Listener:
 		self.lock = threading.Lock()
 
 		buffer_size_s = 1 # Optimal for Raspberry Pi Zero 2 without "input overflow" errors.
-		window_size_s = 3.0 # Required for BirdNET
-		overlap_size_s = 0.5
+		window_overlap_size_s = 0.5
 
+		self.window_size_s = 3.0 # Required for BirdNET
 		self.sample_rate_hz = 48000 # The BirdNET model is trained with 48kHz files
 
 		self.match_threshold = match_threshold
@@ -63,12 +63,15 @@ class Listener:
 
 			self.audio_output_dir = audio_output_dir
 
-		self.step_size_s = window_size_s - overlap_size_s
+		self.step_size_s = self.window_size_s - window_overlap_size_s
 
-		self.window_samples = int(window_size_s * self.sample_rate_hz)
+		self.window_samples = int(self.window_size_s * self.sample_rate_hz)
 		self.step_samples = int(self.step_size_s * self.sample_rate_hz)
 
 		self.buffer_samples = int(buffer_size_s * self.sample_rate_hz)
+
+		# Keep a note of the last detection timestamp for each species
+		self.last_detection_timestamps = {}
 
 		# Load model and labels
 
@@ -246,6 +249,11 @@ class Listener:
 
 			start_time = time.perf_counter()
 
+			current_timestamp = time.time()
+
+			# Avoid triggering the same identification on successive windows, since windows overlap.
+			max_last_detection_timestamp = current_timestamp - self.window_size_s
+
 			input_data = numpy.expand_dims(analysis_buffer, axis=0)
 
 			self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
@@ -268,15 +276,24 @@ class Listener:
 				if index not in self.model_labels:
 					continue
 
+				if index in self.last_detection_timestamps and self.last_detection_timestamps[index] > max_last_detection_timestamp:
+					logger.info('Skip')
+					continue
+
+				self.last_detection_timestamps[index] = current_timestamp
+
 				latin, english, is_bird, is_human = self.model_labels[index]
 				detections.append(Detection(index, english, latin, is_bird, is_human, confidences[index]))
 
 			if self.callback_function:
 
 				if self.audio_output_dir:
+
 					wav_file_path = self.audio_output_dir + '/' + time.strftime('%Y%m%d-%H%M%S') + '.wav'
 					self.save_wav(file_path=wav_file_path, analysis_buffer=analysis_buffer, samplerate=self.sample_rate_hz)
+
 				else:
+
 					wav_file_path = None
 
 				self.callback_function(detections, wav_file_path)
@@ -329,7 +346,7 @@ class Listener:
 				if samples_since_last_window < self.step_samples:
 					continue
 
-				# Reset counter for the next analysis window
+				# Update counter for the next analysis window
 				samples_since_last_window -= self.step_samples
 
 				peak_dbfs = self.get_dbfs_peak(analysis_buffer)
@@ -337,11 +354,9 @@ class Listener:
 				# logger.debug('Peak dBFS: %0.2f', peak_dbfs)
 
 				if self.silence_threshold_dbfs and (peak_dbfs < self.silence_threshold_dbfs):
-					# Peak audio is below threshold
 					logger.debug('Ignoring silent chunk')
 					continue
 
-				# asyncio.create_task(self.birdcatcher(analysis_buffer.copy()))
 				loop.run_in_executor(None, self.birdcatcher, analysis_buffer.copy())
 
 		except KeyboardInterrupt:
