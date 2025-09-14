@@ -5,6 +5,10 @@ from birdnetpy.core import Listener, Detection
 
 def example_callback (detections:list[Detection], wav_file_path:str=None):
 
+	"""
+	This function will be called when items are detected. It is passed as an argument to the Listener() init below.
+	"""
+
 	for detection in detections:
 
 		print(detection)
@@ -19,6 +23,8 @@ def example_callback (detections:list[Detection], wav_file_path:str=None):
 
 async def main ():
 
+	# Initialize a listener
+
 	listener = Listener(
 		match_threshold = 0.8,
 		silence_threshold_dbfs = -60.0,
@@ -26,6 +32,8 @@ async def main ():
 		audio_output_dir = '/tmp',
 		exclude_label_file_path = 'birdnetpy/labels_filter_non_uk.txt'
 	)
+
+	# Listen :)
 
 	await listener.listen()
 
