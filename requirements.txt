@@ -1,4 +1,4 @@
 librosa
 numpy<2
 sounddevice
-tflite-runtime
+tflite-runtime; python_version < "3.12"

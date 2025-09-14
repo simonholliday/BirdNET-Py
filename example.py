@@ -19,7 +19,15 @@ def example_callback (detections:list[Detection], wav_file_path:str=None):
 
 async def main ():
 
-	listener = Listener(match_threshold=0.8, silence_threshold_dbfs=-60.0, callback_function=example_callback, audio_output_dir='/tmp')
+	listener = Listener(
+		match_threshold = 0.8,
+		silence_threshold_dbfs = -60.0,
+		callback_function = example_callback,
+		audio_output_dir = '/tmp',
+#		exclude_label_file_path = 'birdnetpy/labels_filter_non_uk.txt'
+		exclude_label_file_path = None
+	)
+
 	await listener.listen()
 
 if __name__ == '__main__':

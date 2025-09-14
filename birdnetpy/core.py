@@ -25,13 +25,14 @@ Detection = collections.namedtuple('Detection', ['index', 'english_name', 'latin
 
 class Listener:
 
-	def __init__ (self, match_threshold:float=0.75, silence_threshold_dbfs:float=None, callback_function:object=None, audio_output_dir:str=None):
+	def __init__ (self, match_threshold:float=0.75, silence_threshold_dbfs:float=None, callback_function:object=None, audio_output_dir:str=None, exclude_label_file_path:str=None):
 
 		"""
 		match_threshold: The lowest confidence level we want to see matches for (between 0 and 1).
 		silence_threshold_dbfs: If defined, we will check whether there is any signal in the sampled audio which exceeds this level, and if not, it will not be passed to the BirdNET model (a value in dBFS e.g. -60).
 		callback_function: This function will be called any time one or more bird is detected in an audio chunk. It should accept a list of Detection objects and a wav file path as its arguments.
-		audio_output_dir: A directory to store audio when there are detections, or None if we do not want to keep the audio.
+		audio_output_dir: An optional directory to store the analyzed audio when there are detections. Omit or specify `None` if you don't want to keep the audio.
+		exclude_label_file_path: An optional path to a list of labels which will be excluded from detection.
 		"""
 
 		self.lock = threading.Lock()
@@ -75,9 +76,9 @@ class Listener:
 
 		tflite_file_path = module_dir + '/birdnet/BirdNET_GLOBAL_6K_V2.4_Model_FP16.tflite'
 		label_file_path = module_dir + '/birdnet/labels_en.txt'
-		non_bird_label_file_path = module_dir + '/labels_not_birds.txt'
+		non_bird_label_file_path = module_dir + '/labels_non_birds.txt'
 
-		if not self._load_model(tflite_file_path) or not self._load_labels(label_file_path, non_bird_label_file_path):
+		if not self._load_model(tflite_file_path) or not self._import_labels(label_file_path, non_bird_label_file_path, exclude_label_file_path):
 
 			logger.critical('Setup failed')
 			sys.exit(1)
@@ -102,33 +103,95 @@ class Listener:
 
 		return False
 
-	def _load_labels (self, label_file_path:str, non_bird_label_label_file_path:str):
+	def _load_label_file (self, label_file_path:str=None) -> dict:
 
-		logger.info('Loading labels')
+		"""
+		Load items from label_file_path into a dict with each item's row number as its index, and a de-duplicated set
+		Return (set, dict)
+		"""
 
 		try:
 
-			non_bird_labels = set()
+			labels_set = set()
+			labels_dict = {}
 
-			with open(non_bird_label_label_file_path, 'r', encoding='utf-8') as f:
-
-				for _, line in enumerate(f):
-					non_bird_labels.add(line.strip())
-
-			self.labels = {}
+			if label_file_path is None:
+				return labels_set, labels_dict
 
 			with open(label_file_path, 'r', encoding='utf-8') as f:
 
-				for idx, line in enumerate(f):
+				for index, line in enumerate(f):
 
-					line = line.strip()
+					if line.startswith('#'):
+						continue
 
-					latin_name, english_name = line.strip().split('_', 1)
+					label = line.strip()
 
-					is_bird = line not in non_bird_labels
-					is_human = line.startswith('Human ')
+					if label in labels_set:
+						logger.warning('Duplicate label "%s" found in %s' % (label, label_file_path))
 
-					self.labels[idx] = (latin_name, english_name, is_bird, is_human)
+					labels_dict[index] = label
+					labels_set.add(label)
+
+			return labels_set, labels_dict
+
+		except Exception as e:
+
+			logger.error('Something went wrong loading label file: %s' % (label_file_path))
+
+		return False
+
+	def _import_labels (self, label_file_path:str, non_bird_label_file_path:str=None, exclude_label_file_path:str=None):
+
+		"""
+		Import the the label file. If exclude_label_file_path is specified, any items contained in that file will be excluded.
+		Human entries and those which are not birds are flagged.
+		"""
+
+		logger.info('Importing labels')
+
+		try:
+
+			_, model_labels = self._load_label_file(label_file_path)
+
+			num_model_labels = len(model_labels)
+			logger.info('Label file contains %d item%s' % (num_model_labels, '' if num_model_labels == 1 else 's'))
+
+			non_bird_labels, _ = self._load_label_file(non_bird_label_file_path)
+			exclude_labels, _ = self._load_label_file(exclude_label_file_path)
+
+			num_exclude_labels = len(exclude_labels)
+
+			if num_exclude_labels:
+				logger.info('Exclusion filter contains %d item%s' % (num_exclude_labels, '' if num_exclude_labels == 1 else 's'))
+
+			self.model_labels = {}
+
+			for index, model_label in model_labels.items():
+
+				if len(exclude_labels):
+
+					if model_label in exclude_labels:
+						exclude_labels.remove(model_label)
+						continue
+
+				latin_name, english_name = model_label.split('_', 1)
+
+				is_bird = model_label not in non_bird_labels
+				is_human = model_label.startswith('Human ')
+
+				self.model_labels[index] = (latin_name, english_name, is_bird, is_human)
+
+			# If all of the exclude_labels were valid, we should have none left
+
+			num_exclude_labels = len(exclude_labels)
+
+			if num_exclude_labels:
+				logger.info('Exclusion filter contains %d invalid item%s, which were not found in the source labels file' % (num_exclude_labels, '' if num_exclude_labels == 1 else 's'))
+
+			num_imported_labels = len(self.model_labels)
+
+			logger.info('Imported %s label%s' % (num_imported_labels, '' if num_imported_labels == 1 else 's'))
 
 			return True
 
@@ -202,7 +265,10 @@ class Listener:
 
 			for index in indices:
 
-				latin, english, is_bird, is_human = self.labels.get(index, ('Unknown', 'Unknown', None, None))
+				if index not in self.model_labels:
+					continue
+
+				latin, english, is_bird, is_human = self.model_labels[index]
 				detections.append(Detection(index, english, latin, is_bird, is_human, confidences[index]))
 
 			if self.callback_function:

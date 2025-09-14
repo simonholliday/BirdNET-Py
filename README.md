@@ -87,7 +87,14 @@ def example_callback (detections:list[Detection], wav_file_path:str=None):
 
 async def main ():
 
-	listener = Listener(match_threshold=0.8, silence_threshold_dbfs=-60.0, callback_function=example_callback, audio_output_dir='/tmp')
+	listener = Listener(
+		match_threshold = 0.8,
+		silence_threshold_dbfs = -60.0,
+		callback_function = example_callback,
+		audio_output_dir = '/tmp',
+		exclude_label_file_path = 'birdnetpy/labels_filter_non_uk.txt'
+	)
+
 	await listener.listen()
 
 if __name__ == '__main__':
@@ -100,8 +107,10 @@ if __name__ == '__main__':
 - **match_threshold**: The lowest confidence level we want to see matches for (between 0 and 1).
 - **silence_threshold_dbfs**: If defined, we will check whether there is any signal in the sampled audio which exceeds this level, and if not, it will not be passed to the BirdNET model (a value in dBFS e.g. -60).
 - **callback_function**: This function will be called any time one or more bird is detected in an audio chunk. It should accept a list of Detection objects and a wav file path as its arguments.
-- **audio_output_dir**: A directory to store audio when there are detections, or None if we do not want to keep the audio.
+- **audio_output_dir**: An optional directory to store the analyzed audio when there are detections. Omit or specify `None` if you don't want to keep the audio.
+- **exclude_label_file_path**: An optional path to a list of labels which will be excluded from detection. Omit or specify `None` if you don't need filtering.
 
+See *Filtering* below for more information about using `exclude_label_file_path`.
 
 ### Detections
 
@@ -112,6 +121,14 @@ Detection = collections.namedtuple('Detection', ['index', 'english_name', 'latin
 ```
 
 The BirdNET model contains some non-bird items, and so the additional boolean `is_bird` and `is_human` properties are intended to help with classification.
+
+### Filtering
+
+Full implementations of BirdNET sometimes apply geographic and seasonal filters, using occurrence databases to restrict detections to species that are realistically present at a given place and time.
+
+BirdNET-Py takes a simpler and more lightweight approach. Instead of relying on external data sources, it allows you to exclude species using a plain-text list of labels. This file is provided via the optional `exclude_label_file_path` argument when creating a Listener. Any species on the list will be ignored during detection.
+
+This design keeps the code portable and easy to run on small devices, while still giving users flexibility to apply their own filters. For example, the included file `labels_filter_non_uk.txt` excludes species not found in the UK, helping to reduce false positives. You can adapt the same method for other regions or use cases by editing or supplying your own exclusion file.
 
 ## Licence
 
