@@ -24,8 +24,7 @@ async def main ():
 		silence_threshold_dbfs = -60.0,
 		callback_function = example_callback,
 		audio_output_dir = '/tmp',
-#		exclude_label_file_path = 'birdnetpy/labels_filter_non_uk.txt'
-		exclude_label_file_path = None
+		exclude_label_file_path = 'birdnetpy/labels_filter_non_uk.txt'
 	)
 
 	await listener.listen()
