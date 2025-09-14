@@ -6,7 +6,8 @@ from birdnetpy.core import Listener, Detection
 def example_callback (detections:list[Detection], wav_file_path:str=None):
 
 	"""
-	This function will be called when items are detected. It is passed as an argument to the Listener() init below.
+	This function will be called when items are detected.
+	It is passed as an argument to the Listener() init below.
 	"""
 
 	for detection in detections:
