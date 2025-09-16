@@ -1,6 +1,12 @@
+import warnings
+
+warnings.filterwarnings("ignore", message='The value of the smallest subnormal*')
+# warnings.filterwarnings('ignore', category=UserWarning)
+
 import asyncio
 import collections
 import logging
+import numba
 import numpy
 import os
 import pathlib
@@ -24,6 +30,36 @@ logger = logging.getLogger(__name__)
 Detection = collections.namedtuple('Detection', ['index', 'english_name', 'latin_name', 'is_bird', 'is_human', 'confidence'])
 
 class Listener:
+
+	@staticmethod
+	@numba.njit
+	def _custom_sigmoid (x, sensitivity=1.0):
+
+		return 1 / (1 + numpy.exp(-sensitivity * x))
+
+	@staticmethod
+	@numba.njit
+	def get_dbfs_peak (chunk:numpy.ndarray) -> float:
+
+		if len(chunk) == 0:
+			return 0.0
+
+		peak = numpy.max(numpy.abs(chunk))
+		dbfs = 20 * numpy.log10(peak + 1e-10)
+
+		return dbfs
+
+	@staticmethod
+	@numba.njit
+	def get_dbfs_rms (chunk:numpy.ndarray) -> float:
+
+		if len(chunk) == 0:
+			return 0.0
+
+		rms = numpy.sqrt(numpy.mean(chunk**2))
+		dbfs = 20 * numpy.log10(rms + 1e-10)
+
+		return dbfs
 
 	def __init__ (self, match_threshold:float=0.75, silence_threshold_dbfs:float=None, callback_function:object=None, audio_output_dir:str=None, exclude_label_file_path:str=None):
 
@@ -203,30 +239,6 @@ class Listener:
 			logger.critical('Something went wrong loading the labels: %s' % (e))
 
 		return False
-
-	def _custom_sigmoid (self, x, sensitivity=1.0):
-
-		return 1 / (1 + numpy.exp(-sensitivity * x))
-
-	def get_dbfs_peak (self, chunk:numpy.ndarray) -> float:
-
-		if len(chunk) == 0:
-			return 0.0
-
-		peak = numpy.max(numpy.abs(chunk))
-		dbfs = 20 * numpy.log10(peak + 1e-10)
-
-		return dbfs
-
-	def get_dbfs_rms (self, chunk:numpy.ndarray) -> float:
-
-		if len(chunk) == 0:
-			return 0.0
-
-		rms = numpy.sqrt(numpy.mean(chunk**2))
-		dbfs = 20 * numpy.log10(rms + 1e-10)
-
-		return dbfs
 
 	def save_wav (self, file_path:str, analysis_buffer:numpy.ndarray, samplerate:int=48000):
 
