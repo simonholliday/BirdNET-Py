@@ -1,4 +1,5 @@
 import asyncio
+import importlib
 import os
 
 from birdnetpy.core import Listener, Detection
@@ -26,12 +27,14 @@ async def main ():
 
 	# Initialize a listener
 
+	non_uk_label_file_path = str(importlib.resources.files("birdnetpy") / "labels_filter_non_uk.txt")
+
 	listener = Listener(
 		match_threshold = 0.8,
 		silence_threshold_dbfs = -60.0,
 		callback_function = example_callback,
 		audio_output_dir = '/tmp',
-		exclude_label_file_path = 'birdnetpy/labels_filter_non_uk.txt'
+		exclude_label_file_path = non_uk_label_file_path
 	)
 
 	# Listen :)

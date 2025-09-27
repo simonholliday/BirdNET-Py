@@ -24,6 +24,13 @@ package-dir = {""="src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+birdnetpy = [
+	"birdnet/*.tflite",
+	"birdnet/*.txt",
+	"*.txt",
+]
+
 [project.urls]
 Homepage = "https://github.com/simonholliday/BirdNET-Py"
 Repository = "https://github.com/simonholliday/BirdNET-Py"

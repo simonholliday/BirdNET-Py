@@ -5,6 +5,7 @@ warnings.filterwarnings("ignore", message='The value of the smallest subnormal*'
 
 import asyncio
 import collections
+import importlib
 import logging
 import numba
 import numpy
@@ -111,11 +112,9 @@ class Listener:
 
 		# Load model and labels
 
-		module_dir = str(pathlib.Path(__file__).parent)
-
-		tflite_file_path = module_dir + '/birdnet/BirdNET_GLOBAL_6K_V2.4_Model_FP16.tflite'
-		label_file_path = module_dir + '/birdnet/labels_en.txt'
-		non_bird_label_file_path = module_dir + '/labels_non_birds.txt'
+		tflite_file_path = str(importlib.resources.files("birdnetpy.birdnet") / "BirdNET_GLOBAL_6K_V2.4_Model_FP16.tflite")
+		label_file_path = str(importlib.resources.files("birdnetpy.birdnet") / "labels_en.txt")
+		non_bird_label_file_path = str(importlib.resources.files("birdnetpy") / "labels_non_birds.txt")
 
 		if not self._load_model(tflite_file_path) or not self._import_labels(label_file_path, non_bird_label_file_path, exclude_label_file_path):
 
