@@ -64,7 +64,7 @@ pip install .
 
 ## Example
 
-This example is included as `example.py` in the repo.
+This example is included as `examples/demo.py` in the repo.
 
 ```python
 import asyncio
