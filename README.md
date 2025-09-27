@@ -29,7 +29,7 @@ sudo apt-get install portaudio19-dev
 Clone the repository and install normally:
 
 ```bash
-git clone https://github.com/yourusername/birdnetpy.git
+git clone https://github.com/simonholliday/birdnetpy.git
 cd birdnetpy
 pip install .
 ```
