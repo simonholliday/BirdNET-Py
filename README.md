@@ -17,34 +17,35 @@ Privacy Note: Users should be respectful of privacy. If the `is_human` property 
 
 ### Prerequisites
 
-This project requires Python ≥3.7 and <3.12 (due to TensorFlow Lite runtime incompatibility with Python 3.12). The following system package is also required:
+This project requires Python ≥3.7 and <3.12 (due to TensorFlow Lite runtime incompatibility with Python 3.12).
+You’ll also need the PortAudio development headers for audio input:
 
 ```bash
 sudo apt-get install portaudio19-dev
 ```
 
-This project uses a TFLite model that is not compatible with NumPy 2.0 or newer. The requirements.txt file enforces this.
+### Install with pip
 
-### Dependencies
-
-The Python dependencies are listed in requirements.txt:
-
-```
-librosa
-numpy<2
-sounddevice
-tflite-runtime
-```
-
-Install them using `pip`
+Clone the repository and install normally:
 
 ```bash
-pip install -r requirements.txt
+git clone https://github.com/yourusername/birdnetpy.git
+cd birdnetpy
+pip install .
 ```
 
-#### Python Versions
+This will install the package and its dependencies as defined in `pyproject.toml`.
 
-At the time of writing, `tflite-runtime` is not available for Python 3.12 or newer. If your system uses Python 3.12+ by default, you can install Python 3.11 alongside it and create a virtual environment for BirdNET-Py:
+If you plan to contribute or make changes to the code, you may prefer an **editable install**:
+
+```bash
+pip install -e .
+```
+
+### Python version note
+
+At the time of writing, `tflite-runtime` is not available for Python 3.12 or newer.
+If your system uses Python 3.12+ by default, you can install Python 3.11 alongside it and create a virtual environment for BirdNET-Py:
 
 ```bash
 # Install Python 3.11 (Ubuntu example)
@@ -57,8 +58,8 @@ sudo apt install -y python3.11 python3.11-venv
 python3.11 -m venv birdnetpy
 source birdnetpy/bin/activate
 
-# Now install requirements
-pip install -r requirements.txt
+# Install BirdNET-Py
+pip install .
 ```
 
 ## Example

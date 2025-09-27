@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "birdnetpy"
+version = "0.1.6"
+description = "A lightweight asynchronous audio listener and BirdNET analysis pipeline for Python development and experimentation."
+readme = "README.md"
+license = { text = "CC-BY-NC-SA-4.0" }
+requires-python = ">=3.7,<3.12"
+authors = [{name="Simon Holliday", email="si@untitledwork.com"}]
+
+dependencies = [
+	"librosa",
+	"numpy<2",
+	"sounddevice",
+	"tflite-runtime",
+]
+
+[tool.setuptools]
+package-dir = {""="src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.urls]
+Homepage = "https://github.com/simonholliday/BirdNET-Py"
+Repository = "https://github.com/simonholliday/BirdNET-Py"
