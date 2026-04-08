@@ -46,7 +46,9 @@ class Listener:
 
 		return dbfs
 
-	def __init__ (self, match_threshold:float = 0.75, silence_threshold_dbfs:typing.Optional[float] = None, callback_function:typing.Optional[typing.Callable] = None, audio_output_dir:typing.Optional[str] = None, exclude_label_file_path:typing.Optional[str] = None, model_file_path:typing.Optional[str] = None, latitude:typing.Optional[float] = None, longitude:typing.Optional[float] = None, species_threshold:float = 0.03) -> None:
+	SUPPORTED_ANNOTATIONS = {'audacity', 'reaper'}
+
+	def __init__ (self, match_threshold:float = 0.75, silence_threshold_dbfs:typing.Optional[float] = None, callback_function:typing.Optional[typing.Callable] = None, audio_output_dir:typing.Optional[str] = None, exclude_label_file_path:typing.Optional[str] = None, model_file_path:typing.Optional[str] = None, latitude:typing.Optional[float] = None, longitude:typing.Optional[float] = None, species_threshold:float = 0.03, annotate:typing.Optional[str] = None) -> None:
 
 		"""
 		match_threshold: The lowest confidence level we want to see matches for (between 0 and 1).
@@ -58,7 +60,13 @@ class Listener:
 		latitude: Optional latitude for geographic species filtering. Must be provided together with longitude.
 		longitude: Optional longitude for geographic species filtering. Must be provided together with latitude.
 		species_threshold: Minimum probability from the geographic model to include a species (default 0.03). Only used when latitude and longitude are provided.
+		annotate: Optional annotation format for file analysis. Supported: 'audacity' (creates a label track .txt file alongside the audio file). More formats may be added in future.
 		"""
+
+		if annotate and annotate not in self.SUPPORTED_ANNOTATIONS:
+			raise ValueError('Unsupported annotation format: %s (supported: %s)' % (annotate, ', '.join(sorted(self.SUPPORTED_ANNOTATIONS))))
+
+		self.annotate = annotate
 
 		self.lock = threading.Lock()
 
@@ -326,6 +334,66 @@ class Listener:
 
 			wf.writeframes(audio_int16.tobytes())
 
+	def _open_annotation_file (self, audio_file_path:str) -> typing.Optional[typing.IO[str]]:
+
+		"""Open an annotation file for streaming writes. Returns the file handle, or None if annotation is not enabled."""
+
+		if not self.annotate:
+			return None
+
+		base, _ = os.path.splitext(audio_file_path)
+
+		if self.annotate == 'audacity':
+			self._annotation_file_path = base + '.audacity-labels.txt'
+		elif self.annotate == 'reaper':
+			self._annotation_file_path = base + '.reaper-markers.csv'
+
+		f = open(self._annotation_file_path, 'w', encoding='utf-8')
+
+		# Write header for formats that need one
+		if self.annotate == 'reaper':
+			f.write('#,Name,Start,End,Length,Color\n')
+			self._reaper_region_counter = 0
+
+		return f
+
+	@staticmethod
+	def _format_reaper_time (seconds:float) -> str:
+		"""Format seconds as H:MM:SS.mmm for Reaper CSV."""
+
+		h = int(seconds // 3600)
+		m = int((seconds % 3600) // 60)
+		s = seconds % 60
+
+		return '%d:%02d:%06.3f' % (h, m, s)
+
+	def _write_annotation (self, annotation_file:typing.IO[str], detections:typing.List[Detection], timecode_s:float) -> None:
+
+		"""Write detections to the annotation file in the configured format. Flushes after each write."""
+
+		half_window = self.window_size_s / 2
+		window_start = max(0.0, timecode_s - half_window)
+		window_end = timecode_s + half_window
+
+		if self.annotate == 'audacity':
+
+			for detection in detections:
+
+				annotation_file.write('%f\t%f\t%s (%.0f%%)\n' % (window_start, window_end, detection.english_name, 100 * detection.confidence))
+
+		elif self.annotate == 'reaper':
+
+			start_str = self._format_reaper_time(window_start)
+			end_str = self._format_reaper_time(window_end)
+			length_str = self._format_reaper_time(self.window_size_s)
+
+			for detection in detections:
+
+				self._reaper_region_counter += 1
+				annotation_file.write('R%d,%s (%.0f%%),%s,%s,%s,\n' % (self._reaper_region_counter, detection.english_name, 100 * detection.confidence, start_str, end_str, length_str))
+
+		annotation_file.flush()
+
 	def birdcatcher (self, analysis_buffer:numpy.ndarray, timecode_s:typing.Optional[float] = None) -> None:
 
 		"""
@@ -486,61 +554,88 @@ class Listener:
 				self._refresh_geo_filter(week)
 				self._load_model(self._model_file_path)
 
+		# If annotation is enabled, open the file and wrap the callback to write detections as they arrive
+
+		annotation_file = self._open_annotation_file(file_path)
+		original_callback = self.callback_function
+
+		if annotation_file:
+
+			def annotating_callback (detections:typing.List[Detection], wav_file_path:typing.Optional[str] = None, timecode_s:typing.Optional[float] = None) -> None:
+
+				self._write_annotation(annotation_file, detections, typing.cast(float, timecode_s))
+
+				if original_callback:
+					original_callback(detections, wav_file_path, timecode_s)
+
+			self.callback_function = annotating_callback
+
 		try:
 
-			sf = soundfile.SoundFile(file_path)
+			try:
 
-		except soundfile.SoundFileError:
+				sf = soundfile.SoundFile(file_path)
 
-			# Fall back to librosa for formats soundfile can't open directly (e.g. MP3)
-			self._analyze_file_via_librosa(file_path)
-			return
+			except soundfile.SoundFileError:
 
-		with sf:
+				# Fall back to librosa for formats soundfile can't open directly (e.g. MP3)
+				self._analyze_file_via_librosa(file_path)
+				return
 
-			source_rate = sf.samplerate
-			needs_resample = source_rate != self.sample_rate_hz
+			with sf:
 
-			logger.info('File: %dHz, %d channel%s, %.1f seconds%s' % (
-				source_rate,
-				sf.channels,
-				'' if sf.channels == 1 else 's',
-				sf.frames / source_rate,
-				' (will resample to %dHz)' % (self.sample_rate_hz) if needs_resample else ''
-			))
+				source_rate = sf.samplerate
+				needs_resample = source_rate != self.sample_rate_hz
 
-			# Read in chunks of step_samples (2.5s at target rate).
-			# For resampling files, read proportionally more source samples.
+				logger.info('File: %dHz, %d channel%s, %.1f seconds%s' % (
+					source_rate,
+					sf.channels,
+					'' if sf.channels == 1 else 's',
+					sf.frames / source_rate,
+					' (will resample to %dHz)' % (self.sample_rate_hz) if needs_resample else ''
+				))
 
-			if needs_resample:
-				source_chunk_size = int(self.step_samples * source_rate / self.sample_rate_hz)
-			else:
-				source_chunk_size = self.step_samples
+				# Read in chunks of step_samples (2.5s at target rate).
+				# For resampling files, read proportionally more source samples.
 
-			analysis_buffer = numpy.zeros(self.window_samples, dtype=numpy.float32)
-			samples_filled = 0
-			source_samples_read = 0
-
-			while True:
-
-				raw = sf.read(source_chunk_size, dtype='float32', always_2d=True)
-
-				if len(raw) == 0:
-					break
-
-				# Mix to mono
-				chunk = numpy.mean(raw, axis=1)
-
-				# Track samples at the source rate for accurate timecodes
-				source_samples_read += len(chunk)
-
-				# Resample if necessary
 				if needs_resample:
-					chunk = librosa.resample(chunk, orig_sr=source_rate, target_sr=self.sample_rate_hz)
+					source_chunk_size = int(self.step_samples * source_rate / self.sample_rate_hz)
+				else:
+					source_chunk_size = self.step_samples
 
-				analysis_buffer, samples_filled = self._process_file_chunk(
-					chunk, analysis_buffer, samples_filled, source_samples_read, source_rate
-				)
+				analysis_buffer = numpy.zeros(self.window_samples, dtype=numpy.float32)
+				samples_filled = 0
+				source_samples_read = 0
+
+				while True:
+
+					raw = sf.read(source_chunk_size, dtype='float32', always_2d=True)
+
+					if len(raw) == 0:
+						break
+
+					# Mix to mono
+					chunk = numpy.mean(raw, axis=1)
+
+					# Track samples at the source rate for accurate timecodes
+					source_samples_read += len(chunk)
+
+					# Resample if necessary
+					if needs_resample:
+						chunk = librosa.resample(chunk, orig_sr=source_rate, target_sr=self.sample_rate_hz)
+
+					analysis_buffer, samples_filled = self._process_file_chunk(
+						chunk, analysis_buffer, samples_filled, source_samples_read, source_rate
+					)
+
+		finally:
+
+			self.callback_function = original_callback
+
+			if annotation_file:
+
+				annotation_file.close()
+				logger.info('Annotation file created: %s' % (self._annotation_file_path))
 
 		logger.info('File analysis complete')
 

@@ -63,7 +63,30 @@ source birdnetpy/bin/activate
 pip install .
 ```
 
+## Command Line
+
+After installation, the `birdnetpy` command is available for quick file analysis:
+
+```bash
+birdnetpy recording.wav --location 51.454,-2.598 --date 2026-04-07
+```
+
+Options:
+
+| Option | Description |
+|--------|-------------|
+| `--location LAT,LON` | Latitude and longitude for geographic species filtering |
+| `--date YYYY-MM-DD` | Recording date for seasonal filtering |
+| `--threshold N` | Minimum confidence level, 0–1 (default 0.8) |
+| `--species-threshold N` | Minimum geographic probability to include a species, 0–1 (default 0.03) |
+| `--model PATH` | Path to a custom TFLite model file |
+| `--annotate FORMAT` | Write an annotation file alongside the audio (e.g. `audacity`) |
+
+For full help: `birdnetpy --help`
+
 ## Examples
+
+For programmatic usage, two example scripts are included in the `examples/` directory.
 
 Two examples are included in the `examples/` directory.
 
@@ -227,6 +250,18 @@ You can also supply your own compatible TFLite model file via `model_file_path`.
 Any common audio format (WAV, MP3, FLAC, OGG, etc.) is supported, at any sample rate or bit depth — audio is automatically resampled to 48kHz as required by the BirdNET model. Files are streamed from disk in small chunks, so memory usage remains low regardless of file size.
 
 The callback receives a `timecode_s` parameter indicating the midpoint of the 3-second analysis window (in seconds). This minimises the worst-case timing error to 1.5 seconds, since the model cannot localise the call within the window. For live streaming, this value is `None`.
+
+### Annotations
+
+When analyzing files, you can generate annotation files that mark detections in audio editors. Use the `annotate` parameter (or `--annotate` on the command line):
+
+```bash
+birdnetpy recording.wav --location 51.454,-2.598 --date 2026-04-07 --annotate audacity
+```
+
+**Audacity** (`audacity`): Creates a label track file alongside the audio file (e.g. `recording.audacity-labels.txt`). Import it in Audacity via File > Import > Labels. Each detection is written as a region label spanning the 3-second analysis window.
+
+**Reaper** (`reaper`): Creates a CSV marker file alongside the audio file (e.g. `recording.reaper-markers.csv`). Import it in Reaper via the action "Markers/Regions: Import markers/regions from file". Each detection is written as a region spanning the 3-second analysis window.
 
 ### Geographic Filtering
 

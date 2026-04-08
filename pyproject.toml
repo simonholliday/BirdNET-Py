@@ -25,6 +25,9 @@ dev = [
 	"mypy==1.15.0",
 ]
 
+[project.scripts]
+birdnetpy = "birdnetpy.cli:main"
+
 [tool.setuptools]
 package-dir = {""="src"}
 
