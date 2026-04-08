@@ -80,6 +80,7 @@ Options:
 | `--threshold N` | Minimum confidence level, 0–1 (default 0.8) |
 | `--species-threshold N` | Minimum geographic probability to include a species, 0–1 (default 0.03) |
 | `--model PATH` | Path to a custom TFLite model file |
+| `--model-variant VARIANT` | Bundled model variant: `fp16` (default), `fp32`, or `int8` |
 | `--annotate FORMAT` | Write an annotation file alongside the audio (e.g. `audacity`) |
 
 For full help: `birdnetpy --help`

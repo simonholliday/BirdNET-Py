@@ -1,9 +1,16 @@
 import argparse
 import datetime
+import importlib
 import logging
 import typing
 
 import birdnetpy.core
+
+MODEL_VARIANTS = {
+	'fp16': 'BirdNET_GLOBAL_6K_V2.4_Model_FP16.tflite',
+	'fp32': 'BirdNET_GLOBAL_6K_V2.4_Model_FP32.tflite',
+	'int8': 'BirdNET_GLOBAL_6K_V2.4_Model_INT8.tflite',
+}
 
 def _print_detection (detections:typing.List[birdnetpy.core.Detection], wav_file_path:typing.Optional[str] = None, timecode_s:typing.Optional[float] = None) -> None:
 
@@ -29,6 +36,7 @@ def main () -> None:
 	parser.add_argument('--threshold', type=float, default=0.8, help='Minimum confidence level (0-1, default 0.8)')
 	parser.add_argument('--species-threshold', type=float, default=0.03, help='Minimum geographic probability to include a species (0-1, default 0.03)')
 	parser.add_argument('--model', help='Path to a custom TFLite model file')
+	parser.add_argument('--model-variant', choices=sorted(MODEL_VARIANTS.keys()), help='Bundled model variant to use (default fp16)')
 	parser.add_argument('--annotate', choices=sorted(birdnetpy.core.Listener.SUPPORTED_ANNOTATIONS), help='Write annotation file alongside the audio (e.g. audacity)')
 
 	args = parser.parse_args()
@@ -64,12 +72,22 @@ def main () -> None:
 		except ValueError:
 			parser.error('--date must be in YYYY-MM-DD format')
 
+	# Resolve model path
+
+	model_file_path = args.model
+
+	if args.model and args.model_variant:
+		parser.error('--model and --model-variant are mutually exclusive')
+
+	if args.model_variant:
+		model_file_path = str(importlib.resources.files("birdnetpy.birdnet") / MODEL_VARIANTS[args.model_variant])
+
 	# Create listener and analyze
 
 	listener = birdnetpy.core.Listener(
 		match_threshold = args.threshold,
 		callback_function = _print_detection,
-		model_file_path = args.model,
+		model_file_path = model_file_path,
 		latitude = latitude,
 		longitude = longitude,
 		species_threshold = args.species_threshold,

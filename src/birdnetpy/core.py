@@ -144,6 +144,7 @@ class Listener:
 
 		# Load the audio model
 
+		logger.info('Using model: %s' % (os.path.basename(self._model_file_path)))
 		self._load_model(self._model_file_path)
 
 		# Validate that the model output dimension matches the label count
