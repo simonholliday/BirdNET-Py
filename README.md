@@ -204,9 +204,9 @@ This design keeps the code portable and easy to run on small devices, while stil
 
 ## Licence
 
-This project is released under CC BY-NC-SA 4.0
+This project is released under [CC BY-NC-SA 4.0](LICENSE).
 
-See https://creativecommons.org/licenses/by-nc-sa/4.0/ for full terms.
+See https://creativecommons.org/licenses/by-nc-sa/4.0/ for a human-readable summary.
 
 ## Attribution
 
