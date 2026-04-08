@@ -46,7 +46,7 @@ class Listener:
 
 		return dbfs
 
-	SUPPORTED_ANNOTATIONS = {'audacity', 'reaper'}
+	SUPPORTED_ANNOTATIONS = {'audacity', 'csv', 'raven', 'reaper', 'srt'}
 
 	def __init__ (self, match_threshold:float = 0.75, silence_threshold_dbfs:typing.Optional[float] = None, callback_function:typing.Optional[typing.Callable] = None, audio_output_dir:typing.Optional[str] = None, exclude_label_file_path:typing.Optional[str] = None, model_file_path:typing.Optional[str] = None, latitude:typing.Optional[float] = None, longitude:typing.Optional[float] = None, species_threshold:float = 0.03, annotate:typing.Optional[str] = None) -> None:
 
@@ -344,17 +344,29 @@ class Listener:
 
 		base, _ = os.path.splitext(audio_file_path)
 
-		if self.annotate == 'audacity':
-			self._annotation_file_path = base + '.audacity-labels.txt'
-		elif self.annotate == 'reaper':
-			self._annotation_file_path = base + '.reaper-markers.csv'
+		extensions = {
+			'audacity': '.audacity-labels.txt',
+			'csv': '.birdnetpy.csv',
+			'raven': '.raven-selections.txt',
+			'reaper': '.reaper-markers.csv',
+			'srt': '.srt',
+		}
+
+		self._annotation_file_path = base + extensions[self.annotate]
+		self._annotation_counter = 0
 
 		f = open(self._annotation_file_path, 'w', encoding='utf-8')
 
-		# Write header for formats that need one
-		if self.annotate == 'reaper':
+		# Write headers for formats that need them
+
+		if self.annotate == 'csv':
+			f.write('start_s,end_s,english_name,latin_name,confidence\n')
+
+		elif self.annotate == 'raven':
+			f.write('Selection\tView\tChannel\tBegin Time (s)\tEnd Time (s)\tLow Freq (Hz)\tHigh Freq (Hz)\tAnnotation\n')
+
+		elif self.annotate == 'reaper':
 			f.write('#,Name,Start,End,Length,Color\n')
-			self._reaper_region_counter = 0
 
 		return f
 
@@ -367,6 +379,17 @@ class Listener:
 		s = seconds % 60
 
 		return '%d:%02d:%06.3f' % (h, m, s)
+
+	@staticmethod
+	def _format_srt_time (seconds:float) -> str:
+		"""Format seconds as HH:MM:SS,mmm for SRT subtitles."""
+
+		h = int(seconds // 3600)
+		m = int((seconds % 3600) // 60)
+		s = int(seconds % 60)
+		ms = int((seconds % 1) * 1000)
+
+		return '%02d:%02d:%02d,%03d' % (h, m, s, ms)
 
 	def _write_annotation (self, annotation_file:typing.IO[str], detections:typing.List[Detection], timecode_s:float) -> None:
 
@@ -382,6 +405,19 @@ class Listener:
 
 				annotation_file.write('%f\t%f\t%s (%.0f%%)\n' % (window_start, window_end, detection.english_name, 100 * detection.confidence))
 
+		elif self.annotate == 'csv':
+
+			for detection in detections:
+
+				annotation_file.write('%f,%f,%s,%s,%.2f\n' % (window_start, window_end, detection.english_name, detection.latin_name, detection.confidence))
+
+		elif self.annotate == 'raven':
+
+			for detection in detections:
+
+				self._annotation_counter += 1
+				annotation_file.write('%d\tSpectrogram 1\t1\t%f\t%f\t0\t%d\t%s (%.0f%%)\n' % (self._annotation_counter, window_start, window_end, self.sample_rate_hz // 2, detection.english_name, 100 * detection.confidence))
+
 		elif self.annotate == 'reaper':
 
 			start_str = self._format_reaper_time(window_start)
@@ -390,8 +426,18 @@ class Listener:
 
 			for detection in detections:
 
-				self._reaper_region_counter += 1
-				annotation_file.write('R%d,%s (%.0f%%),%s,%s,%s,\n' % (self._reaper_region_counter, detection.english_name, 100 * detection.confidence, start_str, end_str, length_str))
+				self._annotation_counter += 1
+				annotation_file.write('R%d,%s (%.0f%%),%s,%s,%s,\n' % (self._annotation_counter, detection.english_name, 100 * detection.confidence, start_str, end_str, length_str))
+
+		elif self.annotate == 'srt':
+
+			start_str = self._format_srt_time(window_start)
+			end_str = self._format_srt_time(window_end)
+
+			for detection in detections:
+
+				self._annotation_counter += 1
+				annotation_file.write('%d\n%s --> %s\n%s (%.0f%%)\n\n' % (self._annotation_counter, start_str, end_str, detection.english_name, 100 * detection.confidence))
 
 		annotation_file.flush()
 

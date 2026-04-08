@@ -9,7 +9,14 @@ description = "A lightweight Python library for identifying bird species from li
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.7,<3.12"
-authors = [{name="Simon Holliday", email="si@untitledwork.com"}]
+authors = [{name="Simon Holliday", email="simon.holliday@protonmail.com"}]
+keywords = ["birdnet", "bird", "species", "identification", "bioacoustics", "ornithology", "wildlife", "audio", "sound", "detection", "tflite", "machine-learning", "conservation", "ecology", "raven", "audacity"]
+classifiers = [
+	"Development Status :: 4 - Beta",
+	"Intended Audience :: Science/Research",
+	"Topic :: Scientific/Engineering :: Bio-Informatics",
+	"Topic :: Multimedia :: Sound/Audio :: Analysis",
+]
 
 dependencies = [
 	"librosa",
