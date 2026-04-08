@@ -1,15 +1,17 @@
+import os
 import warnings
 
+os.environ.setdefault('TF_CPP_MIN_LOG_LEVEL', '3')
 warnings.filterwarnings("ignore", message='The value of the smallest subnormal*')
 
 import asyncio
 import collections
+import datetime
 import importlib
 import librosa
 import logging
 import numba
 import numpy
-import os
 import sounddevice
 import soundfile
 import tflite_runtime.interpreter
@@ -17,14 +19,6 @@ import threading
 import time
 import typing
 import wave
-
-logging.basicConfig (
-	level = logging.INFO, # DEBUG, INFO, WARNING, ERROR, CRITICAL
-	handlers = [
-		logging.StreamHandler()
-	],
-	encoding = 'utf-8'
-)
 
 logger = logging.getLogger(__name__)
 
@@ -52,20 +46,7 @@ class Listener:
 
 		return dbfs
 
-	@staticmethod
-	@numba.njit
-	def get_dbfs_rms (chunk:numpy.ndarray) -> float:
-		"""Return the RMS level of the chunk in dBFS."""
-
-		if len(chunk) == 0:
-			return 0.0
-
-		rms = numpy.sqrt(numpy.mean(chunk**2))
-		dbfs = 20 * numpy.log10(rms + 1e-10)
-
-		return dbfs
-
-	def __init__ (self, match_threshold:float = 0.75, silence_threshold_dbfs:typing.Optional[float] = None, callback_function:typing.Optional[typing.Callable] = None, audio_output_dir:typing.Optional[str] = None, exclude_label_file_path:typing.Optional[str] = None, model_file_path:typing.Optional[str] = None) -> None:
+	def __init__ (self, match_threshold:float = 0.75, silence_threshold_dbfs:typing.Optional[float] = None, callback_function:typing.Optional[typing.Callable] = None, audio_output_dir:typing.Optional[str] = None, exclude_label_file_path:typing.Optional[str] = None, model_file_path:typing.Optional[str] = None, latitude:typing.Optional[float] = None, longitude:typing.Optional[float] = None, species_threshold:float = 0.03) -> None:
 
 		"""
 		match_threshold: The lowest confidence level we want to see matches for (between 0 and 1).
@@ -74,6 +55,9 @@ class Listener:
 		audio_output_dir: An optional directory to store the analyzed audio when there are detections. Omit or specify `None` if you don't want to keep the audio.
 		exclude_label_file_path: An optional path to a list of labels which will be excluded from detection.
 		model_file_path: An optional path to a TFLite model file. Three variants are bundled: FP32 (highest accuracy, ~50MB), FP16 (default, good balance, ~25MB), and INT8 (smallest, ~39MB). If omitted, the bundled FP16 model is used.
+		latitude: Optional latitude for geographic species filtering. Must be provided together with longitude.
+		longitude: Optional longitude for geographic species filtering. Must be provided together with latitude.
+		species_threshold: Minimum probability from the geographic model to include a species (default 0.03). Only used when latitude and longitude are provided.
 		"""
 
 		self.lock = threading.Lock()
@@ -87,6 +71,18 @@ class Listener:
 		self.match_threshold = match_threshold
 		self.silence_threshold_dbfs = silence_threshold_dbfs
 		self.callback_function = callback_function
+
+		# Geographic filtering
+
+		if (latitude is None) != (longitude is None):
+			raise ValueError('Both latitude and longitude must be provided, or neither')
+
+		self.latitude = latitude
+		self.longitude = longitude
+		self.species_threshold = species_threshold
+		self.geo_species:typing.Optional[typing.Set[int]] = None
+		self._geo_last_refreshed:float = 0.0
+		self._geo_week:int = 0
 
 		self.audio_output_dir = None
 
@@ -112,24 +108,35 @@ class Listener:
 		# Keep a note of the last detection timestamp for each species
 		self.last_detection_timestamps:typing.Dict[int, float] = {}
 
-		# Load model and labels
+		# Resolve audio model path
 
 		if model_file_path:
 
 			if not os.path.isfile(model_file_path):
 				raise FileNotFoundError('Model file does not exist: %s' % (model_file_path))
 
-			tflite_file_path = model_file_path
+			self._model_file_path = model_file_path
 
 		else:
 
-			tflite_file_path = str(importlib.resources.files("birdnetpy.birdnet") / "BirdNET_GLOBAL_6K_V2.4_Model_FP16.tflite")
+			self._model_file_path = str(importlib.resources.files("birdnetpy.birdnet") / "BirdNET_GLOBAL_6K_V2.4_Model_FP16.tflite")
+
+		# Import labels first (no model needed)
 
 		label_file_path = str(importlib.resources.files("birdnetpy.birdnet") / "labels_en.txt")
 		non_bird_label_file_path = str(importlib.resources.files("birdnetpy") / "labels_non_birds.txt")
 
-		self._load_model(tflite_file_path)
 		self._import_labels(label_file_path, non_bird_label_file_path, exclude_label_file_path)
+
+		# Geographic filtering is deferred to first use in birdcatcher (live) or analyze_file (file).
+		# This avoids loading the geo model at init only to reload it with a different week later.
+
+		if self.latitude is None:
+			logger.warning('No latitude/longitude provided — geographic filtering is disabled, all species are candidates')
+
+		# Load the audio model
+
+		self._load_model(self._model_file_path)
 
 		# Validate that the model output dimension matches the label count
 
@@ -142,12 +149,79 @@ class Listener:
 
 		"""Load the TFLite model from the given file path."""
 
-		logger.info('Loading model')
+		logger.debug('Loading model')
 
 		self.interpreter = tflite_runtime.interpreter.Interpreter(model_path=file_path, experimental_delegates=None)
 		self.interpreter.allocate_tensors()
 		self.input_details = self.interpreter.get_input_details()
 		self.output_details = self.interpreter.get_output_details()
+
+	@staticmethod
+	def _date_to_week (d:datetime.date) -> int:
+		"""Convert a date to BirdNET week number (1–48)."""
+
+		return min(48, max(1, int(d.timetuple().tm_yday / 7.625) + 1))
+
+	def _unload_model (self) -> None:
+		"""Unload the current audio model to free memory."""
+
+		if hasattr(self, 'interpreter'):
+			del self.interpreter
+			del self.input_details
+			del self.output_details
+
+	def _refresh_geo_filter (self, week:int) -> None:
+
+		"""
+		Generate a geographic species filter using the MData model.
+		Only one TFLite model is kept in memory at a time: the audio model is unloaded
+		before the MData model is loaded, and reloaded afterwards.
+		"""
+
+		# Unload the audio model if it is currently loaded
+
+		self._unload_model()
+
+		# Load the MData model
+
+		geo_model_path = str(importlib.resources.files("birdnetpy.birdnet") / "BirdNET_GLOBAL_6K_V2.4_MData_Model_V2_FP16.tflite")
+
+		lat = typing.cast(float, self.latitude)
+		lon = typing.cast(float, self.longitude)
+
+		logger.info('Loading geographic model for lat=%.2f, lon=%.2f, week=%d' % (lat, lon, week))
+
+		geo_interpreter = tflite_runtime.interpreter.Interpreter(model_path=geo_model_path, experimental_delegates=None)
+		geo_interpreter.allocate_tensors()
+
+		geo_input = geo_interpreter.get_input_details()[0]
+		geo_output = geo_interpreter.get_output_details()[0]
+
+		# Run inference
+
+		sample = numpy.array([[lat, lon, week]], dtype='float32')
+		geo_interpreter.set_tensor(geo_input['index'], sample)
+		geo_interpreter.invoke()
+
+		probabilities = geo_interpreter.get_tensor(geo_output['index'])[0]
+
+		# Build the set of allowed label indices
+
+		self.geo_species = set()
+
+		for index in range(len(probabilities)):
+
+			if probabilities[index] >= self.species_threshold and index in self.model_labels:
+				self.geo_species.add(index)
+
+		logger.info('Geographic filter: %d species for this location and time of year' % (len(self.geo_species)))
+
+		# Unload the MData model
+
+		del geo_interpreter
+
+		self._geo_week = week
+		self._geo_last_refreshed = time.time()
 
 	def _load_label_file (self, label_file_path:typing.Optional[str] = None) -> typing.Tuple[typing.Set[str], typing.Dict[int, str]]:
 
@@ -189,12 +263,12 @@ class Listener:
 		Human entries and those which are not birds are flagged.
 		"""
 
-		logger.info('Importing labels')
+		logger.debug('Importing labels')
 
 		_, model_labels = self._load_label_file(label_file_path)
 
 		self.num_source_labels = len(model_labels)
-		logger.info('Label file contains %d item%s' % (self.num_source_labels, '' if self.num_source_labels == 1 else 's'))
+		logger.debug('Label file contains %d item%s' % (self.num_source_labels, '' if self.num_source_labels == 1 else 's'))
 
 		non_bird_labels, _ = self._load_label_file(non_bird_label_file_path)
 		exclude_labels, _ = self._load_label_file(exclude_label_file_path)
@@ -202,7 +276,7 @@ class Listener:
 		num_exclude_labels = len(exclude_labels)
 
 		if num_exclude_labels:
-			logger.info('Exclusion filter contains %d item%s' % (num_exclude_labels, '' if num_exclude_labels == 1 else 's'))
+			logger.debug('Exclusion filter contains %d item%s' % (num_exclude_labels, '' if num_exclude_labels == 1 else 's'))
 
 		self.model_labels:typing.Dict[int, typing.Tuple[str, str, bool, bool]] = {}
 
@@ -226,11 +300,11 @@ class Listener:
 		num_exclude_labels = len(exclude_labels)
 
 		if num_exclude_labels:
-			logger.info('Exclusion filter contains %d invalid item%s, which were not found in the source labels file' % (num_exclude_labels, '' if num_exclude_labels == 1 else 's'))
+			logger.debug('Exclusion filter contains %d invalid item%s, which were not found in the source labels file' % (num_exclude_labels, '' if num_exclude_labels == 1 else 's'))
 
 		num_imported_labels = len(self.model_labels)
 
-		logger.info('Imported %s label%s' % (num_imported_labels, '' if num_imported_labels == 1 else 's'))
+		logger.debug('Imported %s label%s' % (num_imported_labels, '' if num_imported_labels == 1 else 's'))
 
 	def _save_wav (self, file_path:str, analysis_buffer:numpy.ndarray, samplerate:int = 48000) -> None:
 
@@ -263,6 +337,12 @@ class Listener:
 
 			current_timestamp = timecode_s if timecode_s is not None else time.time()
 
+			# Refresh the geographic filter every 12 hours for long-running sessions
+			if self.latitude is not None and (current_timestamp - self._geo_last_refreshed) > 43200:
+
+				self._refresh_geo_filter(self._date_to_week(datetime.date.today()))
+				self._load_model(self._model_file_path)
+
 			# Avoid triggering the same identification on successive windows, since windows overlap.
 			max_last_detection_timestamp = current_timestamp - self.window_size_s
 
@@ -286,6 +366,9 @@ class Listener:
 			for index in indices:
 
 				if index not in self.model_labels:
+					continue
+
+				if self.geo_species is not None and index not in self.geo_species:
 					continue
 
 				if index in self.last_detection_timestamps and self.last_detection_timestamps[index] > max_last_detection_timestamp:
@@ -361,7 +444,7 @@ class Listener:
 
 		return analysis_buffer, samples_filled
 
-	def analyze_file (self, file_path:str) -> None:
+	def analyze_file (self, file_path:str, analysis_date:typing.Optional[datetime.date] = None) -> None:
 
 		"""
 		Analyze a pre-recorded audio file by streaming it in chunks. The audio is resampled
@@ -371,6 +454,10 @@ class Listener:
 
 		Supports any audio format handled by soundfile (WAV, FLAC, OGG, etc.) and via
 		librosa for formats requiring decoding (MP3, etc.).
+
+		analysis_date: Optional date for geographic filtering. If lat/lon is set and no date
+		is provided, year-round filtering is used (all species that could appear at that
+		location in any season).
 		"""
 
 		if not os.path.isfile(file_path):
@@ -380,6 +467,21 @@ class Listener:
 
 		# Reset dedup timestamps for file analysis
 		self.last_detection_timestamps.clear()
+
+		# Refresh geographic filter for the analysis date if lat/lon is set
+
+		if self.latitude is not None:
+
+			if analysis_date:
+				week = self._date_to_week(analysis_date)
+			else:
+				logger.warning('No analysis_date provided — using year-round geographic filtering')
+				week = -1
+
+			if week != self._geo_week:
+
+				self._refresh_geo_filter(week)
+				self._load_model(self._model_file_path)
 
 		try:
 
@@ -448,9 +550,8 @@ class Listener:
 
 		logger.info('Using librosa decoder for: %s' % (file_path))
 
-		# Read the source sample rate once before streaming
-		info = soundfile.info(file_path)
-		source_rate = info.samplerate
+		# Get the native sample rate using librosa (not soundfile, which may not support this format)
+		source_rate = int(librosa.get_samplerate(file_path))
 		needs_resample = source_rate != self.sample_rate_hz
 
 		analysis_buffer = numpy.zeros(self.window_samples, dtype=numpy.float32)
@@ -481,7 +582,7 @@ class Listener:
 		loop = asyncio.get_running_loop()
 		queue:asyncio.Queue[numpy.ndarray] = asyncio.Queue()
 
-		def callback (indata, frames, time, status):
+		def callback (indata, frames, stream_time, status):
 
 			if status:
 				logger.warning("Sounddevice status: %s" % (status))

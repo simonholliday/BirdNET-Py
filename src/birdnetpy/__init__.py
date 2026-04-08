@@ -1,8 +1,10 @@
-"""BirdNET-Py: A lightweight asynchronous audio listener and BirdNET analysis pipeline."""
+"""BirdNET-Py: A lightweight Python library for identifying bird species from live audio or pre-recorded files."""
 
-__version__ = "0.1.6"
+import importlib.metadata
 
 import birdnetpy.core
+
+__version__ = importlib.metadata.version("birdnetpy")
 
 Detection = birdnetpy.core.Detection
 Listener = birdnetpy.core.Listener

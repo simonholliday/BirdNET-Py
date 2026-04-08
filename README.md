@@ -8,7 +8,7 @@ BirdNET-Py detects bird species by analyzing 3-second audio windows (with a 0.5-
 - **Live streaming** — continuously listens to a microphone or audio input and reports detections in real time.
 - **File analysis** — processes pre-recorded audio files (WAV, MP3, FLAC, OGG, etc.) at any sample rate or bit depth, reporting detections with timecodes. Files are streamed from disk in small chunks, so memory usage stays low even for very large recordings.
 
-Three quantization variants of the BirdNET V2.4 model are bundled (FP32, FP16, INT8), or you can supply your own compatible TFLite model. Optional label filtering lets you restrict detections to species expected in your region.
+Three quantization variants of the BirdNET V2.4 model are bundled (FP32, FP16, INT8), or you can supply your own compatible TFLite model. Geographic filtering by latitude, longitude, and time of year automatically restricts detections to species expected at your location, or you can provide a custom exclusion file.
 
 The code is optimized for reliable operation on resource-constrained devices like the Raspberry Pi Zero 2, where analysis of a 3-second audio window typically completes in under 0.8 seconds. If an audio output directory is specified, the analysis buffer is saved as a WAV file whenever a detection is made.
 
@@ -63,70 +63,113 @@ source birdnetpy/bin/activate
 pip install .
 ```
 
-## Example
+## Examples
 
-This example is included as `examples/demo.py` in the repo.
+Two examples are included in the `examples/` directory.
+
+### Live streaming (`examples/analyze_stream.py`)
+
+Listens to a microphone and prints detections in real time:
+
+```bash
+python examples/analyze_stream.py
+```
 
 ```python
 import asyncio
-import importlib
+import logging
 import os
-import sys
 import typing
+
+logging.basicConfig(level=logging.INFO)
 
 import birdnetpy.core
 
-def example_callback (detections:typing.List[birdnetpy.core.Detection], wav_file_path:typing.Optional[str] = None, timecode_s:typing.Optional[float] = None) -> None:
+def on_detection (detections:typing.List[birdnetpy.core.Detection], wav_file_path:typing.Optional[str] = None, timecode_s:typing.Optional[float] = None) -> None:
 
-	"""
-	This function will be called when items are detected.
-	It is passed as an argument to the Listener() init below.
-	"""
+	"""Called each time one or more species is detected."""
 
 	for detection in detections:
-
-		if timecode_s is not None:
-
-			minutes, seconds = divmod(timecode_s, 60)
-			print('[%02d:%05.2f] %s (%.0f%%)' % (int(minutes), seconds, detection.english_name, 100 * detection.confidence))
-
-		else:
-
-			print('%s (%.0f%%)' % (detection.english_name, 100 * detection.confidence))
+		print('%s (%.0f%%)' % (detection.english_name, 100 * detection.confidence))
 
 	if wav_file_path and os.path.isfile(wav_file_path):
-
-		# The user is responsible for managing the saved WAV files.
-		# In this example, we'll just remove the file to prevent the disk from filling up.
-
 		os.remove(wav_file_path)
 
 async def main () -> None:
 
-	"""Initialize a listener and start detecting."""
-
-	non_uk_label_file_path = str(importlib.resources.files("birdnetpy") / "labels_filter_non_uk.txt")
+	"""Listen to live audio and print detections."""
 
 	listener = birdnetpy.core.Listener(
 		match_threshold = 0.8,
 		silence_threshold_dbfs = -60.0,
-		callback_function = example_callback,
-		exclude_label_file_path = non_uk_label_file_path
+		callback_function = on_detection,
+		latitude = 51.454,   # Bristol, UK
+		longitude = -2.598
 	)
 
-	# If an audio file is provided as an argument, analyze it. Otherwise, listen live.
-
-	if len(sys.argv) > 1:
-
-		listener.analyze_file(sys.argv[1])
-
-	else:
-
-		await listener.listen()
+	await listener.listen()
 
 if __name__ == '__main__':
 
 	asyncio.run(main())
+```
+
+### File analysis (`examples/analyze_file.py`)
+
+Analyzes a pre-recorded audio file and prints detections with timecodes:
+
+```bash
+python examples/analyze_file.py /path/to/recording.wav
+python examples/analyze_file.py /path/to/recording.wav 2025-06-15
+```
+
+```python
+import datetime
+import logging
+import sys
+import typing
+
+logging.basicConfig(level=logging.INFO)
+
+import birdnetpy.core
+
+def on_detection (detections:typing.List[birdnetpy.core.Detection], wav_file_path:typing.Optional[str] = None, timecode_s:typing.Optional[float] = None) -> None:
+
+	"""Called each time one or more species is detected."""
+
+	for detection in detections:
+
+		minutes, seconds = divmod(typing.cast(float, timecode_s), 60)
+		print('[%02d:%05.2f] %s (%.0f%%)' % (int(minutes), seconds, detection.english_name, 100 * detection.confidence))
+
+def main () -> None:
+
+	"""Analyze an audio file and print detections with timecodes."""
+
+	if len(sys.argv) < 2:
+		print('Usage: python analyze_file.py <audio_file> [YYYY-MM-DD]')
+		sys.exit(1)
+
+	file_path = sys.argv[1]
+
+	# Parse optional date argument, or default to None (year-round filtering)
+	analysis_date = None
+
+	if len(sys.argv) > 2:
+		analysis_date = datetime.date.fromisoformat(sys.argv[2])
+
+	listener = birdnetpy.core.Listener(
+		match_threshold = 0.8,
+		callback_function = on_detection,
+		latitude = 51.454,   # Bristol, UK
+		longitude = -2.598
+	)
+
+	listener.analyze_file(file_path, analysis_date=analysis_date)
+
+if __name__ == '__main__':
+
+	main()
 ```
 
 ### Parameters for the Listener object
@@ -137,8 +180,11 @@ if __name__ == '__main__':
 - **audio_output_dir**: An optional directory to store the analyzed audio when there are detections. Omit or specify `None` if you don't want to keep the audio.
 - **exclude_label_file_path**: An optional path to a list of labels which will be excluded from detection. Omit or specify `None` if you don't need filtering.
 - **model_file_path**: An optional path to a TFLite model file. If omitted, the bundled FP16 model is used. See *Model Variants* below.
+- **latitude**: Optional latitude for geographic species filtering. Must be provided together with `longitude`. See *Geographic Filtering* below.
+- **longitude**: Optional longitude for geographic species filtering. Must be provided together with `latitude`.
+- **species_threshold**: Minimum probability from the geographic model to include a species (default 0.03). Only used when `latitude` and `longitude` are provided.
 
-See *Filtering* below for more information about using `exclude_label_file_path`.
+See *Filtering* below for more information about filtering options.
 
 ### Detections
 
@@ -178,29 +224,41 @@ You can also supply your own compatible TFLite model file via `model_file_path`.
 
 ### File Analysis
 
-In addition to live audio streaming, you can analyze pre-recorded audio files. Any common audio format (WAV, MP3, FLAC, OGG, etc.) is supported, at any sample rate or bit depth — the audio is automatically resampled to 48kHz as required by the BirdNET model.
+Any common audio format (WAV, MP3, FLAC, OGG, etc.) is supported, at any sample rate or bit depth — audio is automatically resampled to 48kHz as required by the BirdNET model. Files are streamed from disk in small chunks, so memory usage remains low regardless of file size.
+
+The callback receives a `timecode_s` parameter indicating the midpoint of the 3-second analysis window (in seconds). This minimises the worst-case timing error to 1.5 seconds, since the model cannot localise the call within the window. For live streaming, this value is `None`.
+
+### Geographic Filtering
+
+By providing `latitude` and `longitude` when creating a Listener, BirdNET-Py uses a bundled geographic model to automatically filter detections to species that are likely present at that location and time of year. This uses the BirdNET V2.4 MData model, which predicts species occurrence based on eBird data.
 
 ```python
-listener.analyze_file('/path/to/recording.wav')
+listener = birdnetpy.core.Listener(
+	latitude = 51.454,   # Bristol, UK
+	longitude = -2.598,
+	callback_function = my_callback
+)
 ```
 
-The callback receives a `timecode_s` parameter indicating the midpoint of the 3-second analysis window (in seconds). This minimises the worst-case timing error to 1.5 seconds, since the model cannot localise the call within the window. For live streaming, this value is `None`. See the example above for how to format the timecode.
+For live streaming, the filter is refreshed automatically every 12 hours to account for seasonal changes. For file analysis, you can provide a specific date:
 
-Audio is streamed from disk in small chunks, so memory usage remains low regardless of file size.
+```python
+import datetime
 
-The demo can be run against a file directly:
-
-```bash
-python examples/demo.py /path/to/recording.wav
+listener.analyze_file('recording.wav', analysis_date=datetime.date(2025, 6, 15))
 ```
 
-### Filtering
+The `species_threshold` parameter controls how selective the filter is (default 0.03, i.e. 3% probability). Lower values include more species; higher values are more restrictive.
 
-Full implementations of BirdNET sometimes apply geographic and seasonal filters, using occurrence databases to restrict detections to species that are realistically present at a given place and time.
+To conserve memory on devices like the Raspberry Pi, only one TFLite model is loaded at a time — the geographic model is loaded to generate the filter, then unloaded before the audio model is loaded.
 
-BirdNET-Py takes a simpler and more lightweight approach. Instead of relying on external data sources, it allows you to exclude species using a plain-text list of labels. This file is provided via the optional `exclude_label_file_path` argument when creating a Listener. Any species on the list will be ignored during detection.
+### Exclusion File Filtering
 
-This design keeps the code portable and easy to run on small devices, while still giving users flexibility to apply their own filters. For example, the included file `labels_filter_non_uk.txt` excludes species not found in the UK, helping to reduce false positives. You can adapt the same method for other regions or use cases by editing or supplying your own exclusion file.
+As an alternative (or in addition) to geographic filtering, you can exclude species using a plain-text list of labels via `exclude_label_file_path`. Any species on the list will be ignored during detection.
+
+For example, the included file `labels_filter_non_uk.txt` excludes species not found in the UK. You can adapt the same method for other regions or use cases by supplying your own exclusion file.
+
+Both filtering methods can be used together — the exclusion file is applied first, then the geographic filter further narrows the list.
 
 ## Licence
 
@@ -215,6 +273,7 @@ This project includes *unmodified* files from the [BirdNET-Analyzer](https://git
 - `birdnet/BirdNET_GLOBAL_6K_V2.4_Model_FP32.tflite`
 - `birdnet/BirdNET_GLOBAL_6K_V2.4_Model_FP16.tflite`
 - `birdnet/BirdNET_GLOBAL_6K_V2.4_Model_INT8.tflite`
+- `birdnet/BirdNET_GLOBAL_6K_V2.4_MData_Model_V2_FP16.tflite`
 - `birdnet/labels_en.txt`
 
 These files are provided under the terms of the [CC BY-NC-SA 4.0 licence](https://creativecommons.org/licenses/by-nc-sa/4.0/).  
