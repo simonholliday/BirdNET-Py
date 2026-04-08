@@ -16,6 +16,7 @@ dependencies = [
 	"numba",
 	"numpy<2",
 	"sounddevice",
+	"soundfile",
 	"tflite-runtime",
 ]
 

@@ -11,6 +11,7 @@ import numba
 import numpy
 import os
 import sounddevice
+import soundfile
 import tflite_runtime.interpreter
 import threading
 import time
@@ -34,12 +35,14 @@ class Listener:
 	@staticmethod
 	@numba.njit
 	def _custom_sigmoid (x, sensitivity=1.0):
+		"""Apply a sigmoid function with adjustable sensitivity to convert logits to probabilities."""
 
 		return 1 / (1 + numpy.exp(-sensitivity * x))
 
 	@staticmethod
 	@numba.njit
 	def get_dbfs_peak (chunk:numpy.ndarray) -> float:
+		"""Return the peak amplitude of the chunk in dBFS."""
 
 		if len(chunk) == 0:
 			return 0.0
@@ -52,6 +55,7 @@ class Listener:
 	@staticmethod
 	@numba.njit
 	def get_dbfs_rms (chunk:numpy.ndarray) -> float:
+		"""Return the RMS level of the chunk in dBFS."""
 
 		if len(chunk) == 0:
 			return 0.0
@@ -285,7 +289,7 @@ class Listener:
 					continue
 
 				if index in self.last_detection_timestamps and self.last_detection_timestamps[index] > max_last_detection_timestamp:
-					logger.info('Skip')
+					logger.debug('Skipping duplicate detection: %s' % (self.model_labels[index][1]))
 					continue
 
 				self.last_detection_timestamps[index] = current_timestamp
@@ -310,49 +314,163 @@ class Listener:
 
 			logger.debug('Analysis took %0.2f seconds' % (end_time-start_time))
 
+	def _process_file_chunk (self, chunk:numpy.ndarray, analysis_buffer:numpy.ndarray, samples_filled:int, source_samples_read:int, source_rate:int) -> typing.Tuple[numpy.ndarray, int]:
+
+		"""
+		Append a chunk of resampled audio to the analysis buffer and run detection when full.
+		Returns the updated (analysis_buffer, samples_filled).
+		"""
+
+		chunk_len = len(chunk)
+
+		if chunk_len >= self.window_samples:
+
+			# Chunk is larger than the window (unlikely but handle it)
+			analysis_buffer = chunk[-self.window_samples:].copy()
+			samples_filled = self.window_samples
+
+		elif samples_filled + chunk_len >= self.window_samples:
+
+			# Shift and append
+			analysis_buffer = numpy.roll(analysis_buffer, -chunk_len)
+			analysis_buffer[-chunk_len:] = chunk
+			samples_filled = self.window_samples
+
+		else:
+
+			# Still filling the initial window
+			analysis_buffer[samples_filled:samples_filled + chunk_len] = chunk
+			samples_filled += chunk_len
+			return analysis_buffer, samples_filled
+
+		# Timecode is the midpoint of the analysis window, since we can't know
+		# where in the 3-second window the call occurred.
+		# source_samples_read tracks samples at the original file rate.
+		source_position_s = source_samples_read / source_rate
+		timecode_s = source_position_s - (self.window_size_s / 2)
+
+		if self.silence_threshold_dbfs:
+
+			peak_dbfs = self.get_dbfs_peak(analysis_buffer)
+
+			if peak_dbfs < self.silence_threshold_dbfs:
+				logger.debug('Ignoring silent chunk at %.1fs' % (timecode_s))
+				return analysis_buffer, samples_filled
+
+		self.birdcatcher(analysis_buffer.copy(), timecode_s)
+
+		return analysis_buffer, samples_filled
+
 	def analyze_file (self, file_path:str) -> None:
 
 		"""
-		Analyze a pre-recorded audio file. The file is loaded, resampled to 48kHz, and processed
-		using the same sliding window as live streaming. Detections are passed to the callback
-		with a timecode_s value indicating the position within the file (in seconds).
+		Analyze a pre-recorded audio file by streaming it in chunks. The audio is resampled
+		to 48kHz if necessary and processed using the same sliding window as live streaming.
+		Detections are passed to the callback with a timecode_s value indicating the midpoint
+		of the analysis window (in seconds).
 
-		Supports any audio format handled by librosa (WAV, MP3, FLAC, OGG, etc.).
+		Supports any audio format handled by soundfile (WAV, FLAC, OGG, etc.) and via
+		librosa for formats requiring decoding (MP3, etc.).
 		"""
 
 		if not os.path.isfile(file_path):
 			raise FileNotFoundError('Audio file does not exist: %s' % (file_path))
 
-		logger.info('Loading audio file: %s' % (file_path))
-
-		audio, _ = librosa.load(file_path, sr=self.sample_rate_hz, mono=True)
-
-		duration_s = len(audio) / self.sample_rate_hz
-		logger.info('Loaded %.1f seconds of audio' % (duration_s))
+		logger.info('Analyzing audio file: %s' % (file_path))
 
 		# Reset dedup timestamps for file analysis
 		self.last_detection_timestamps.clear()
 
-		# Slide a window across the audio with the same step size as live streaming
-		window_start = 0
+		try:
 
-		while window_start + self.window_samples <= len(audio):
+			sf = soundfile.SoundFile(file_path)
 
-			analysis_buffer = audio[window_start:window_start + self.window_samples]
-			timecode_s = window_start / self.sample_rate_hz
+		except soundfile.SoundFileError:
 
-			if self.silence_threshold_dbfs:
+			# Fall back to librosa for formats soundfile can't open directly (e.g. MP3)
+			self._analyze_file_via_librosa(file_path)
+			return
 
-				peak_dbfs = self.get_dbfs_peak(analysis_buffer)
+		with sf:
 
-				if peak_dbfs < self.silence_threshold_dbfs:
-					logger.debug('Ignoring silent chunk at %.1fs' % (timecode_s))
-					window_start += self.step_samples
-					continue
+			source_rate = sf.samplerate
+			needs_resample = source_rate != self.sample_rate_hz
 
-			self.birdcatcher(analysis_buffer, timecode_s)
+			logger.info('File: %dHz, %d channel%s, %.1f seconds%s' % (
+				source_rate,
+				sf.channels,
+				'' if sf.channels == 1 else 's',
+				sf.frames / source_rate,
+				' (will resample to %dHz)' % (self.sample_rate_hz) if needs_resample else ''
+			))
 
-			window_start += self.step_samples
+			# Read in chunks of step_samples (2.5s at target rate).
+			# For resampling files, read proportionally more source samples.
+
+			if needs_resample:
+				source_chunk_size = int(self.step_samples * source_rate / self.sample_rate_hz)
+			else:
+				source_chunk_size = self.step_samples
+
+			analysis_buffer = numpy.zeros(self.window_samples, dtype=numpy.float32)
+			samples_filled = 0
+			source_samples_read = 0
+
+			while True:
+
+				raw = sf.read(source_chunk_size, dtype='float32', always_2d=True)
+
+				if len(raw) == 0:
+					break
+
+				# Mix to mono
+				chunk = numpy.mean(raw, axis=1)
+
+				# Track samples at the source rate for accurate timecodes
+				source_samples_read += len(chunk)
+
+				# Resample if necessary
+				if needs_resample:
+					chunk = librosa.resample(chunk, orig_sr=source_rate, target_sr=self.sample_rate_hz)
+
+				analysis_buffer, samples_filled = self._process_file_chunk(
+					chunk, analysis_buffer, samples_filled, source_samples_read, source_rate
+				)
+
+		logger.info('File analysis complete')
+
+	def _analyze_file_via_librosa (self, file_path:str) -> None:
+
+		"""
+		Fallback for audio formats that soundfile cannot open directly (e.g. MP3).
+		Uses librosa.stream to process the file in chunks without loading it entirely.
+		"""
+
+		logger.info('Using librosa decoder for: %s' % (file_path))
+
+		# Read the source sample rate once before streaming
+		info = soundfile.info(file_path)
+		source_rate = info.samplerate
+		needs_resample = source_rate != self.sample_rate_hz
+
+		analysis_buffer = numpy.zeros(self.window_samples, dtype=numpy.float32)
+		samples_filled = 0
+		source_samples_read = 0
+
+		# librosa.stream returns blocks at the file's native sample rate
+		for chunk in librosa.stream(file_path, block_length=1, frame_length=self.step_samples, hop_length=self.step_samples, mono=True):
+
+			# Track samples at the source rate for accurate timecodes
+			source_samples_read += len(chunk)
+
+			if needs_resample:
+				chunk = librosa.resample(chunk, orig_sr=source_rate, target_sr=self.sample_rate_hz)
+
+			chunk = chunk.astype(numpy.float32)
+
+			analysis_buffer, samples_filled = self._process_file_chunk(
+				chunk, analysis_buffer, samples_filled, source_samples_read, source_rate
+			)
 
 		logger.info('File analysis complete')
 

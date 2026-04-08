@@ -3,9 +3,9 @@
 
 **A lightweight asynchronous audio listener and BirdNET analysis pipeline for Python development and experimentation.**
 
-This project provides a simple class that continuously listens to an audio input, passing 3-second chunks of audio (with a 0.5-second overlap) to be analyzed by the BirdNET-Lite model. Detections are returned to a user-defined callback function.
+This project provides a simple class that can either continuously listen to a live audio input or analyze pre-recorded audio files, passing 3-second chunks of audio (with a 0.5-second overlap) to be analyzed by the BirdNET model. Detections are returned to a user-defined callback function.
 
-It uses asyncio for efficient, non-blocking audio capture and offloads the CPU-intensive model inference to a separate thread. This design ensures the audio stream is never interrupted, preventing buffer overflows and lost samples.
+For live streaming, it uses asyncio for efficient, non-blocking audio capture and offloads the CPU-intensive model inference to a separate thread. This design ensures the audio stream is never interrupted, preventing buffer overflows and lost samples. For file analysis, audio is streamed from disk in small chunks, keeping memory usage low even for very large files.
 
 If an audio output directory is specified, the 3-second analysis buffer is saved to a 16-bit WAV file whenever a positive detection is made. The full file path is then passed to the callback function.
 
@@ -183,7 +183,9 @@ In addition to live audio streaming, you can analyze pre-recorded audio files. A
 listener.analyze_file('/path/to/recording.wav')
 ```
 
-The callback receives a `timecode_s` parameter indicating the position within the file (in seconds). For live streaming, this value is `None`. See the example above for how to format the timecode.
+The callback receives a `timecode_s` parameter indicating the midpoint of the 3-second analysis window (in seconds). This minimises the worst-case timing error to 1.5 seconds, since the model cannot localise the call within the window. For live streaming, this value is `None`. See the example above for how to format the timecode.
+
+Audio is streamed from disk in small chunks, so memory usage remains low regardless of file size.
 
 The demo can be run against a file directly:
 
@@ -218,4 +220,4 @@ These files are provided under the terms of the [CC BY-NC-SA 4.0 licence](https:
 
 ## Disclaimer
 
-BirdNET-Py uses the BirdNET-Lite model for automatic sound detection. Like all machine learning tools, it may not always provide perfectly accurate results, so please use detections as a helpful guide rather than definitive proof. This project is intended for experimentation and development, and no warranty or guarantee of accuracy is provided.
+BirdNET-Py uses the BirdNET model for automatic sound detection. Like all machine learning tools, it may not always provide perfectly accurate results, so please use detections as a helpful guide rather than definitive proof. This project is intended for experimentation and development, and no warranty or guarantee of accuracy is provided.
