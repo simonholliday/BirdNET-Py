@@ -121,6 +121,7 @@ if __name__ == '__main__':
 - **callback_function**: This function will be called any time one or more bird is detected in an audio chunk. It should accept a list of Detection objects and a wav file path as its arguments.
 - **audio_output_dir**: An optional directory to store the analyzed audio when there are detections. Omit or specify `None` if you don't want to keep the audio.
 - **exclude_label_file_path**: An optional path to a list of labels which will be excluded from detection. Omit or specify `None` if you don't need filtering.
+- **model_file_path**: An optional path to a TFLite model file. If omitted, the bundled FP16 model is used. See *Model Variants* below.
 
 See *Filtering* below for more information about using `exclude_label_file_path`.
 
@@ -133,6 +134,32 @@ Detection = collections.namedtuple('Detection', ['index', 'english_name', 'latin
 ```
 
 The BirdNET model contains some non-bird items, and so the additional boolean `is_bird` and `is_human` properties are intended to help with classification.
+
+### Model Variants
+
+Three variants of the BirdNET V2.4 model are bundled:
+
+| Variant | Size | Best for |
+|---------|------|----------|
+| **FP32** | ~50MB | Maximum accuracy, desktop/server hardware |
+| **FP16** (default) | ~25MB | Good balance of accuracy and size |
+| **INT8** | ~39MB | Optimised for edge devices and constrained hardware |
+
+All three accept the same input format (48kHz float32 audio) and produce the same output shape.
+
+To use a specific bundled variant:
+
+```python
+import importlib
+
+model_path = str(importlib.resources.files("birdnetpy.birdnet") / "BirdNET_GLOBAL_6K_V2.4_Model_INT8.tflite")
+
+listener = birdnetpy.core.Listener(
+	model_file_path = model_path
+)
+```
+
+You can also supply your own compatible TFLite model file via `model_file_path`.
 
 ### Filtering
 
@@ -150,10 +177,12 @@ See https://creativecommons.org/licenses/by-nc-sa/4.0/ for full terms.
 
 ## Attribution
 
-This project includes two *unmodified* files from the [BirdNET-Lite](https://github.com/birdnet-team/BirdNET-Lite) project by the [BirdNET-Team](https://github.com/birdnet-team):
+This project includes *unmodified* files from the [BirdNET-Analyzer](https://github.com/birdnet-team/BirdNET-Analyzer) project by the [BirdNET-Team](https://github.com/birdnet-team):
 
-- `birdnet/BirdNET_GLOBAL_6K_V2.4_Model_FP16.tflite`  
-- `birdnet/labels_en.txt`  
+- `birdnet/BirdNET_GLOBAL_6K_V2.4_Model_FP32.tflite`
+- `birdnet/BirdNET_GLOBAL_6K_V2.4_Model_FP16.tflite`
+- `birdnet/BirdNET_GLOBAL_6K_V2.4_Model_INT8.tflite`
+- `birdnet/labels_en.txt`
 
 These files are provided under the terms of the [CC BY-NC-SA 4.0 licence](https://creativecommons.org/licenses/by-nc-sa/4.0/).  
 

@@ -60,7 +60,7 @@ class Listener:
 
 		return dbfs
 
-	def __init__ (self, match_threshold:float = 0.75, silence_threshold_dbfs:typing.Optional[float] = None, callback_function:typing.Optional[typing.Callable] = None, audio_output_dir:typing.Optional[str] = None, exclude_label_file_path:typing.Optional[str] = None) -> None:
+	def __init__ (self, match_threshold:float = 0.75, silence_threshold_dbfs:typing.Optional[float] = None, callback_function:typing.Optional[typing.Callable] = None, audio_output_dir:typing.Optional[str] = None, exclude_label_file_path:typing.Optional[str] = None, model_file_path:typing.Optional[str] = None) -> None:
 
 		"""
 		match_threshold: The lowest confidence level we want to see matches for (between 0 and 1).
@@ -68,6 +68,7 @@ class Listener:
 		callback_function: This function will be called any time one or more bird is detected in an audio chunk. It should accept a list of Detection objects and a wav file path as its arguments.
 		audio_output_dir: An optional directory to store the analyzed audio when there are detections. Omit or specify `None` if you don't want to keep the audio.
 		exclude_label_file_path: An optional path to a list of labels which will be excluded from detection.
+		model_file_path: An optional path to a TFLite model file. Three variants are bundled: FP32 (highest accuracy, ~50MB), FP16 (default, good balance, ~25MB), and INT8 (smallest, ~39MB). If omitted, the bundled FP16 model is used.
 		"""
 
 		self.lock = threading.Lock()
@@ -108,12 +109,30 @@ class Listener:
 
 		# Load model and labels
 
-		tflite_file_path = str(importlib.resources.files("birdnetpy.birdnet") / "BirdNET_GLOBAL_6K_V2.4_Model_FP16.tflite")
+		if model_file_path:
+
+			if not os.path.isfile(model_file_path):
+				raise FileNotFoundError('Model file does not exist: %s' % (model_file_path))
+
+			tflite_file_path = model_file_path
+
+		else:
+
+			tflite_file_path = str(importlib.resources.files("birdnetpy.birdnet") / "BirdNET_GLOBAL_6K_V2.4_Model_FP16.tflite")
+
 		label_file_path = str(importlib.resources.files("birdnetpy.birdnet") / "labels_en.txt")
 		non_bird_label_file_path = str(importlib.resources.files("birdnetpy") / "labels_non_birds.txt")
 
 		self._load_model(tflite_file_path)
 		self._import_labels(label_file_path, non_bird_label_file_path, exclude_label_file_path)
+
+		# Validate that the model output dimension matches the label count
+
+		output_classes = self.output_details[0]['shape'][1]
+		num_labels = len(self.model_labels)
+
+		if output_classes != num_labels:
+			logger.warning('Model output size (%d) does not match label count (%d)' % (output_classes, num_labels))
 
 	def _load_model (self, file_path:str) -> None:
 
@@ -125,7 +144,6 @@ class Listener:
 		self.interpreter.allocate_tensors()
 		self.input_details = self.interpreter.get_input_details()
 		self.output_details = self.interpreter.get_output_details()
-		self.input_type = self.input_details[0]['dtype']
 
 	def _load_label_file (self, label_file_path:typing.Optional[str] = None) -> typing.Tuple[typing.Set[str], typing.Dict[int, str]]:
 
