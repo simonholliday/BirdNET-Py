@@ -70,11 +70,12 @@ This example is included as `examples/demo.py` in the repo.
 import asyncio
 import importlib
 import os
+import sys
 import typing
 
 import birdnetpy.core
 
-def example_callback (detections:typing.List[birdnetpy.core.Detection], wav_file_path:typing.Optional[str] = None) -> None:
+def example_callback (detections:typing.List[birdnetpy.core.Detection], wav_file_path:typing.Optional[str] = None, timecode_s:typing.Optional[float] = None) -> None:
 
 	"""
 	This function will be called when items are detected.
@@ -83,8 +84,14 @@ def example_callback (detections:typing.List[birdnetpy.core.Detection], wav_file
 
 	for detection in detections:
 
-		print(detection)
-		print('We detected a %s with a confidence level of %0.2f%%' % (detection.english_name, 100 * detection.confidence))
+		if timecode_s is not None:
+
+			minutes, seconds = divmod(timecode_s, 60)
+			print('[%02d:%05.2f] %s (%.0f%%)' % (int(minutes), seconds, detection.english_name, 100 * detection.confidence))
+
+		else:
+
+			print('%s (%.0f%%)' % (detection.english_name, 100 * detection.confidence))
 
 	if wav_file_path and os.path.isfile(wav_file_path):
 
@@ -103,11 +110,18 @@ async def main () -> None:
 		match_threshold = 0.8,
 		silence_threshold_dbfs = -60.0,
 		callback_function = example_callback,
-		audio_output_dir = '/tmp',
 		exclude_label_file_path = non_uk_label_file_path
 	)
 
-	await listener.listen()
+	# If an audio file is provided as an argument, analyze it. Otherwise, listen live.
+
+	if len(sys.argv) > 1:
+
+		listener.analyze_file(sys.argv[1])
+
+	else:
+
+		await listener.listen()
 
 if __name__ == '__main__':
 
@@ -118,7 +132,7 @@ if __name__ == '__main__':
 
 - **match_threshold**: The lowest confidence level we want to see matches for (between 0 and 1).
 - **silence_threshold_dbfs**: If defined, we will check whether there is any signal in the sampled audio which exceeds this level, and if not, it will not be passed to the BirdNET model (a value in dBFS e.g. -60).
-- **callback_function**: This function will be called any time one or more bird is detected in an audio chunk. It should accept a list of Detection objects and a wav file path as its arguments.
+- **callback_function**: This function will be called any time one or more bird is detected in an audio chunk. It should accept three arguments: a list of Detection objects, a wav file path (or `None`), and a timecode in seconds (or `None` for live streaming).
 - **audio_output_dir**: An optional directory to store the analyzed audio when there are detections. Omit or specify `None` if you don't want to keep the audio.
 - **exclude_label_file_path**: An optional path to a list of labels which will be excluded from detection. Omit or specify `None` if you don't need filtering.
 - **model_file_path**: An optional path to a TFLite model file. If omitted, the bundled FP16 model is used. See *Model Variants* below.
@@ -160,6 +174,22 @@ listener = birdnetpy.core.Listener(
 ```
 
 You can also supply your own compatible TFLite model file via `model_file_path`.
+
+### File Analysis
+
+In addition to live audio streaming, you can analyze pre-recorded audio files. Any common audio format (WAV, MP3, FLAC, OGG, etc.) is supported, at any sample rate or bit depth — the audio is automatically resampled to 48kHz as required by the BirdNET model.
+
+```python
+listener.analyze_file('/path/to/recording.wav')
+```
+
+The callback receives a `timecode_s` parameter indicating the position within the file (in seconds). For live streaming, this value is `None`. See the example above for how to format the timecode.
+
+The demo can be run against a file directly:
+
+```bash
+python examples/demo.py /path/to/recording.wav
+```
 
 ### Filtering
 

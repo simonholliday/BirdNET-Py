@@ -5,6 +5,7 @@ warnings.filterwarnings("ignore", message='The value of the smallest subnormal*'
 import asyncio
 import collections
 import importlib
+import librosa
 import logging
 import numba
 import numpy
@@ -65,7 +66,7 @@ class Listener:
 		"""
 		match_threshold: The lowest confidence level we want to see matches for (between 0 and 1).
 		silence_threshold_dbfs: If defined, we will check whether there is any signal in the sampled audio which exceeds this level, and if not, it will not be passed to the BirdNET model (a value in dBFS e.g. -60).
-		callback_function: This function will be called any time one or more bird is detected in an audio chunk. It should accept a list of Detection objects and a wav file path as its arguments.
+		callback_function: This function will be called any time one or more bird is detected in an audio chunk. It should accept three arguments: a list of Detection objects, a wav file path (or None), and a timecode in seconds (or None for live streaming).
 		audio_output_dir: An optional directory to store the analyzed audio when there are detections. Omit or specify `None` if you don't want to keep the audio.
 		exclude_label_file_path: An optional path to a list of labels which will be excluded from detection.
 		model_file_path: An optional path to a TFLite model file. Three variants are bundled: FP32 (highest accuracy, ~50MB), FP16 (default, good balance, ~25MB), and INT8 (smallest, ~39MB). If omitted, the bundled FP16 model is used.
@@ -129,10 +130,9 @@ class Listener:
 		# Validate that the model output dimension matches the label count
 
 		output_classes = self.output_details[0]['shape'][1]
-		num_labels = len(self.model_labels)
 
-		if output_classes != num_labels:
-			logger.warning('Model output size (%d) does not match label count (%d)' % (output_classes, num_labels))
+		if output_classes != self.num_source_labels:
+			logger.warning('Model output size (%d) does not match label count (%d)' % (output_classes, self.num_source_labels))
 
 	def _load_model (self, file_path:str) -> None:
 
@@ -189,8 +189,8 @@ class Listener:
 
 		_, model_labels = self._load_label_file(label_file_path)
 
-		num_model_labels = len(model_labels)
-		logger.info('Label file contains %d item%s' % (num_model_labels, '' if num_model_labels == 1 else 's'))
+		self.num_source_labels = len(model_labels)
+		logger.info('Label file contains %d item%s' % (self.num_source_labels, '' if self.num_source_labels == 1 else 's'))
 
 		non_bird_labels, _ = self._load_label_file(non_bird_label_file_path)
 		exclude_labels, _ = self._load_label_file(exclude_label_file_path)
@@ -245,15 +245,19 @@ class Listener:
 
 			wf.writeframes(audio_int16.tobytes())
 
-	def birdcatcher (self, analysis_buffer:numpy.ndarray) -> None:
+	def birdcatcher (self, analysis_buffer:numpy.ndarray, timecode_s:typing.Optional[float] = None) -> None:
 
-		"""Run inference on the analysis buffer and invoke the callback with any detections."""
+		"""
+		Run inference on the analysis buffer and invoke the callback with any detections.
+		If timecode_s is provided (file mode), it is used for dedup and passed to the callback.
+		If None (live mode), wall-clock time is used and timecode_s is passed as None.
+		"""
 
 		with self.lock:
 
 			start_time = time.perf_counter()
 
-			current_timestamp = time.time()
+			current_timestamp = timecode_s if timecode_s is not None else time.time()
 
 			# Avoid triggering the same identification on successive windows, since windows overlap.
 			max_last_detection_timestamp = current_timestamp - self.window_size_s
@@ -300,11 +304,57 @@ class Listener:
 
 					wav_file_path = None
 
-				self.callback_function(detections, wav_file_path)
+				self.callback_function(detections, wav_file_path, timecode_s)
 
 			end_time = time.perf_counter()
 
 			logger.debug('Analysis took %0.2f seconds' % (end_time-start_time))
+
+	def analyze_file (self, file_path:str) -> None:
+
+		"""
+		Analyze a pre-recorded audio file. The file is loaded, resampled to 48kHz, and processed
+		using the same sliding window as live streaming. Detections are passed to the callback
+		with a timecode_s value indicating the position within the file (in seconds).
+
+		Supports any audio format handled by librosa (WAV, MP3, FLAC, OGG, etc.).
+		"""
+
+		if not os.path.isfile(file_path):
+			raise FileNotFoundError('Audio file does not exist: %s' % (file_path))
+
+		logger.info('Loading audio file: %s' % (file_path))
+
+		audio, _ = librosa.load(file_path, sr=self.sample_rate_hz, mono=True)
+
+		duration_s = len(audio) / self.sample_rate_hz
+		logger.info('Loaded %.1f seconds of audio' % (duration_s))
+
+		# Reset dedup timestamps for file analysis
+		self.last_detection_timestamps.clear()
+
+		# Slide a window across the audio with the same step size as live streaming
+		window_start = 0
+
+		while window_start + self.window_samples <= len(audio):
+
+			analysis_buffer = audio[window_start:window_start + self.window_samples]
+			timecode_s = window_start / self.sample_rate_hz
+
+			if self.silence_threshold_dbfs:
+
+				peak_dbfs = self.get_dbfs_peak(analysis_buffer)
+
+				if peak_dbfs < self.silence_threshold_dbfs:
+					logger.debug('Ignoring silent chunk at %.1fs' % (timecode_s))
+					window_start += self.step_samples
+					continue
+
+			self.birdcatcher(analysis_buffer, timecode_s)
+
+			window_start += self.step_samples
+
+		logger.info('File analysis complete')
 
 	async def listen (self) -> None:
 

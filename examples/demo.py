@@ -1,11 +1,12 @@
 import asyncio
 import importlib
 import os
+import sys
 import typing
 
 import birdnetpy.core
 
-def example_callback (detections:typing.List[birdnetpy.core.Detection], wav_file_path:typing.Optional[str] = None) -> None:
+def example_callback (detections:typing.List[birdnetpy.core.Detection], wav_file_path:typing.Optional[str] = None, timecode_s:typing.Optional[float] = None) -> None:
 
 	"""
 	This function will be called when items are detected.
@@ -14,8 +15,14 @@ def example_callback (detections:typing.List[birdnetpy.core.Detection], wav_file
 
 	for detection in detections:
 
-		print(detection)
-		print('We detected a %s with a confidence level of %0.2f%%' % (detection.english_name, 100 * detection.confidence))
+		if timecode_s is not None:
+
+			minutes, seconds = divmod(timecode_s, 60)
+			print('[%02d:%05.2f] %s (%.0f%%)' % (int(minutes), seconds, detection.english_name, 100 * detection.confidence))
+
+		else:
+
+			print('%s (%.0f%%)' % (detection.english_name, 100 * detection.confidence))
 
 	if wav_file_path and os.path.isfile(wav_file_path):
 
@@ -34,11 +41,18 @@ async def main () -> None:
 		match_threshold = 0.8,
 		silence_threshold_dbfs = -60.0,
 		callback_function = example_callback,
-		audio_output_dir = '/tmp',
 		exclude_label_file_path = non_uk_label_file_path
 	)
 
-	await listener.listen()
+	# If an audio file is provided as an argument, analyze it. Otherwise, listen live.
+
+	if len(sys.argv) > 1:
+
+		listener.analyze_file(sys.argv[1])
+
+	else:
+
+		await listener.listen()
 
 if __name__ == '__main__':
 
