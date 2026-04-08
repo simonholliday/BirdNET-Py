@@ -22,7 +22,7 @@ BirdNET-Py is designed for wildlife researchers, citizen scientists, conservatio
 
 ### Prerequisites
 
-This project requires Python ≥3.7 and <3.12 (due to TensorFlow Lite runtime incompatibility with Python 3.12).
+This project requires Python ≥3.9.
 You'll also need the PortAudio development headers for audio input:
 
 ```bash
@@ -45,26 +45,6 @@ If you plan to contribute or make changes to the code, you may prefer an **edita
 
 ```bash
 pip install -e .
-```
-
-### Python version note
-
-At the time of writing, `tflite-runtime` is not available for Python 3.12 or newer.
-If your system uses Python 3.12+ by default, you can install Python 3.11 alongside it and create a virtual environment for BirdNET-Py:
-
-```bash
-# Install Python 3.11 (Ubuntu example)
-sudo apt install -y software-properties-common
-sudo add-apt-repository ppa:deadsnakes/ppa
-sudo apt update
-sudo apt install -y python3.11 python3.11-venv
-
-# Create and activate a Python 3.11 virtual environment
-python3.11 -m venv birdnetpy
-source birdnetpy/bin/activate
-
-# Install BirdNET-Py
-pip install .
 ```
 
 ## Quick Start

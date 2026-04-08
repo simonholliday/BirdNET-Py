@@ -8,7 +8,7 @@ version = "0.1.6"
 description = "A lightweight Python library for identifying bird species from live audio or pre-recorded files using the BirdNET model."
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.7,<3.12"
+requires-python = ">=3.9"
 authors = [{name="Simon Holliday", email="simon.holliday@protonmail.com"}]
 keywords = ["birdnet", "bird", "species", "identification", "bioacoustics", "ornithology", "wildlife", "audio", "sound", "detection", "tflite", "machine-learning", "conservation", "ecology", "raven", "audacity"]
 classifiers = [
@@ -24,7 +24,7 @@ dependencies = [
 	"numpy<2",
 	"sounddevice",
 	"soundfile",
-	"tflite-runtime",
+	"ai-edge-litert",
 ]
 
 [project.optional-dependencies]

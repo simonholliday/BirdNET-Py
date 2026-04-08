@@ -14,7 +14,7 @@ import numba
 import numpy
 import sounddevice
 import soundfile
-import tflite_runtime.interpreter
+import ai_edge_litert.interpreter
 import threading
 import time
 import typing
@@ -160,7 +160,7 @@ class Listener:
 
 		logger.debug('Loading model')
 
-		self.interpreter = tflite_runtime.interpreter.Interpreter(model_path=file_path, experimental_delegates=None)
+		self.interpreter = ai_edge_litert.interpreter.Interpreter(model_path=file_path, experimental_delegates=None)
 		self.interpreter.allocate_tensors()
 		self.input_details = self.interpreter.get_input_details()
 		self.output_details = self.interpreter.get_output_details()
@@ -200,7 +200,7 @@ class Listener:
 
 		logger.info('Loading geographic model for lat=%.2f, lon=%.2f, week=%d' % (lat, lon, week))
 
-		geo_interpreter = tflite_runtime.interpreter.Interpreter(model_path=geo_model_path, experimental_delegates=None)
+		geo_interpreter = ai_edge_litert.interpreter.Interpreter(model_path=geo_model_path, experimental_delegates=None)
 		geo_interpreter.allocate_tensors()
 
 		geo_input = geo_interpreter.get_input_details()[0]
