@@ -1,17 +1,18 @@
 [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
 # BirdNET-Py
 
-**A lightweight asynchronous audio listener and BirdNET analysis pipeline for Python development and experimentation.**
+**A lightweight Python library for identifying bird species from live audio or pre-recorded files using the BirdNET model.**
 
-This project provides a simple class that can either continuously listen to a live audio input or analyze pre-recorded audio files, passing 3-second chunks of audio (with a 0.5-second overlap) to be analyzed by the BirdNET model. Detections are returned to a user-defined callback function.
+BirdNET-Py detects bird species by analyzing 3-second audio windows (with a 0.5-second overlap) and returning results to a user-defined callback function. It supports two modes:
 
-For live streaming, it uses asyncio for efficient, non-blocking audio capture and offloads the CPU-intensive model inference to a separate thread. This design ensures the audio stream is never interrupted, preventing buffer overflows and lost samples. For file analysis, audio is streamed from disk in small chunks, keeping memory usage low even for very large files.
+- **Live streaming** — continuously listens to a microphone or audio input and reports detections in real time.
+- **File analysis** — processes pre-recorded audio files (WAV, MP3, FLAC, OGG, etc.) at any sample rate or bit depth, reporting detections with timecodes. Files are streamed from disk in small chunks, so memory usage stays low even for very large recordings.
 
-If an audio output directory is specified, the 3-second analysis buffer is saved to a 16-bit WAV file whenever a positive detection is made. The full file path is then passed to the callback function.
+Three quantization variants of the BirdNET V2.4 model are bundled (FP32, FP16, INT8), or you can supply your own compatible TFLite model. Optional label filtering lets you restrict detections to species expected in your region.
 
-It is intended as a tool to simplify access to the BirdNET model for Python developers. The code is highly optimized to ensure reliable, uninterrupted audio streaming even on devices like the Raspberry Pi Zero 2. On this hardware, analysis of a 3-second audio file is typically completed in under 0.8 seconds.
+The code is optimized for reliable operation on resource-constrained devices like the Raspberry Pi Zero 2, where analysis of a 3-second audio window typically completes in under 0.8 seconds. If an audio output directory is specified, the analysis buffer is saved as a WAV file whenever a detection is made.
 
-Privacy Note: Users should be respectful of privacy. If the `is_human` property is `True` in any detections, the corresponding audio file may contain human speech.
+Privacy Note: Users should be respectful of privacy. If the `is_human` property is `True` in any detections, the corresponding audio may contain human speech.
 
 ## Installation
 
