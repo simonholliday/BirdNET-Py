@@ -214,7 +214,10 @@ class Listener:
 			if probabilities[index] >= self.species_threshold and index in self.model_labels:
 				self.geo_species.add(index)
 
-		logger.info('Geographic filter: %d species for this location and time of year' % (len(self.geo_species)))
+		if week == -1:
+			logger.info('Geographic filter: %d species for this location (year-round)' % (len(self.geo_species)))
+		else:
+			logger.info('Geographic filter: %d species for this location and time of year' % (len(self.geo_species)))
 
 		# Unload the MData model
 
