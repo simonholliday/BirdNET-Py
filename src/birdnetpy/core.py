@@ -1,7 +1,6 @@
 import warnings
 
 warnings.filterwarnings("ignore", message='The value of the smallest subnormal*')
-# warnings.filterwarnings('ignore', category=UserWarning)
 
 import asyncio
 import collections
@@ -10,12 +9,11 @@ import logging
 import numba
 import numpy
 import os
-import pathlib
 import sounddevice
-import sys
 import tflite_runtime.interpreter
 import threading
 import time
+import typing
 import wave
 
 logging.basicConfig (
@@ -62,7 +60,7 @@ class Listener:
 
 		return dbfs
 
-	def __init__ (self, match_threshold:float=0.75, silence_threshold_dbfs:float=None, callback_function:object=None, audio_output_dir:str=None, exclude_label_file_path:str=None):
+	def __init__ (self, match_threshold:float = 0.75, silence_threshold_dbfs:typing.Optional[float] = None, callback_function:typing.Optional[typing.Callable] = None, audio_output_dir:typing.Optional[str] = None, exclude_label_file_path:typing.Optional[str] = None) -> None:
 
 		"""
 		match_threshold: The lowest confidence level we want to see matches for (between 0 and 1).
@@ -91,12 +89,10 @@ class Listener:
 			audio_output_dir = audio_output_dir.rstrip('/\\')
 
 			if not os.path.isdir(audio_output_dir):
-				logger.critical('Audio output directory does not exist: %s' % (audio_output_dir))
-				sys.exit(1)
+				raise FileNotFoundError('Audio output directory does not exist: %s' % (audio_output_dir))
 
 			if not os.access(audio_output_dir, os.W_OK):
-				logger.critical('Audio output directory is not writeable: %s' % (audio_output_dir))
-				sys.exit(1)
+				raise PermissionError('Audio output directory is not writeable: %s' % (audio_output_dir))
 
 			self.audio_output_dir = audio_output_dir
 
@@ -108,7 +104,7 @@ class Listener:
 		self.buffer_samples = int(buffer_size_s * self.sample_rate_hz)
 
 		# Keep a note of the last detection timestamp for each species
-		self.last_detection_timestamps = {}
+		self.last_detection_timestamps:typing.Dict[int, float] = {}
 
 		# Load model and labels
 
@@ -116,130 +112,107 @@ class Listener:
 		label_file_path = str(importlib.resources.files("birdnetpy.birdnet") / "labels_en.txt")
 		non_bird_label_file_path = str(importlib.resources.files("birdnetpy") / "labels_non_birds.txt")
 
-		if not self._load_model(tflite_file_path) or not self._import_labels(label_file_path, non_bird_label_file_path, exclude_label_file_path):
+		self._load_model(tflite_file_path)
+		self._import_labels(label_file_path, non_bird_label_file_path, exclude_label_file_path)
 
-			logger.critical('Setup failed')
-			sys.exit(1)
+	def _load_model (self, file_path:str) -> None:
 
-	def _load_model (self, file_path:str):
+		"""Load the TFLite model from the given file path."""
 
 		logger.info('Loading model')
 
-		try:
+		self.interpreter = tflite_runtime.interpreter.Interpreter(model_path=file_path, experimental_delegates=None)
+		self.interpreter.allocate_tensors()
+		self.input_details = self.interpreter.get_input_details()
+		self.output_details = self.interpreter.get_output_details()
+		self.input_type = self.input_details[0]['dtype']
 
-			self.interpreter = tflite_runtime.interpreter.Interpreter(model_path=file_path, experimental_delegates=None)
-			self.interpreter.allocate_tensors()
-			self.input_details = self.interpreter.get_input_details()
-			self.output_details = self.interpreter.get_output_details()
-			self.input_type = self.input_details[0]['dtype']
-
-			return True
-
-		except Exception as e:
-
-			logger.critical('Something went wrong loading the model: %s' % (e))
-
-		return False
-
-	def _load_label_file (self, label_file_path:str=None) -> dict:
+	def _load_label_file (self, label_file_path:typing.Optional[str] = None) -> typing.Tuple[typing.Set[str], typing.Dict[int, str]]:
 
 		"""
-		Load items from label_file_path into a dict with each item's row number as its index, and a de-duplicated set
-		Return (set, dict)
+		Load items from label_file_path into a dict with each item's row number as its index, and a de-duplicated set.
+		Comment lines (starting with #) and blank lines are skipped without incrementing the index.
 		"""
 
-		try:
+		labels_set:typing.Set[str] = set()
+		labels_dict:typing.Dict[int, str] = {}
 
-			labels_set = set()
-			labels_dict = {}
-
-			if label_file_path is None:
-				return labels_set, labels_dict
-
-			with open(label_file_path, 'r', encoding='utf-8') as f:
-
-				for index, line in enumerate(f):
-
-					if line.startswith('#'):
-						continue
-
-					label = line.strip()
-
-					if label in labels_set:
-						logger.warning('Duplicate label "%s" found in %s' % (label, label_file_path))
-
-					labels_dict[index] = label
-					labels_set.add(label)
-
+		if label_file_path is None:
 			return labels_set, labels_dict
 
-		except Exception as e:
+		with open(label_file_path, 'r', encoding='utf-8') as f:
 
-			logger.error('Something went wrong loading label file: %s' % (label_file_path))
+			index = 0
 
-		return False
+			for line in f:
 
-	def _import_labels (self, label_file_path:str, non_bird_label_file_path:str=None, exclude_label_file_path:str=None):
+				if line.startswith('#') or not line.strip():
+					continue
+
+				label = line.strip()
+
+				if label in labels_set:
+					logger.warning('Duplicate label "%s" found in %s' % (label, label_file_path))
+
+				labels_dict[index] = label
+				labels_set.add(label)
+				index += 1
+
+		return labels_set, labels_dict
+
+	def _import_labels (self, label_file_path:str, non_bird_label_file_path:typing.Optional[str] = None, exclude_label_file_path:typing.Optional[str] = None) -> None:
 
 		"""
-		Import the the label file. If exclude_label_file_path is specified, any items contained in that file will be excluded.
+		Import the label file. If exclude_label_file_path is specified, any items contained in that file will be excluded.
 		Human entries and those which are not birds are flagged.
 		"""
 
 		logger.info('Importing labels')
 
-		try:
+		_, model_labels = self._load_label_file(label_file_path)
 
-			_, model_labels = self._load_label_file(label_file_path)
+		num_model_labels = len(model_labels)
+		logger.info('Label file contains %d item%s' % (num_model_labels, '' if num_model_labels == 1 else 's'))
 
-			num_model_labels = len(model_labels)
-			logger.info('Label file contains %d item%s' % (num_model_labels, '' if num_model_labels == 1 else 's'))
+		non_bird_labels, _ = self._load_label_file(non_bird_label_file_path)
+		exclude_labels, _ = self._load_label_file(exclude_label_file_path)
 
-			non_bird_labels, _ = self._load_label_file(non_bird_label_file_path)
-			exclude_labels, _ = self._load_label_file(exclude_label_file_path)
+		num_exclude_labels = len(exclude_labels)
 
-			num_exclude_labels = len(exclude_labels)
+		if num_exclude_labels:
+			logger.info('Exclusion filter contains %d item%s' % (num_exclude_labels, '' if num_exclude_labels == 1 else 's'))
 
-			if num_exclude_labels:
-				logger.info('Exclusion filter contains %d item%s' % (num_exclude_labels, '' if num_exclude_labels == 1 else 's'))
+		self.model_labels:typing.Dict[int, typing.Tuple[str, str, bool, bool]] = {}
 
-			self.model_labels = {}
+		for index, model_label in model_labels.items():
 
-			for index, model_label in model_labels.items():
+			if len(exclude_labels):
 
-				if len(exclude_labels):
+				if model_label in exclude_labels:
+					exclude_labels.remove(model_label)
+					continue
 
-					if model_label in exclude_labels:
-						exclude_labels.remove(model_label)
-						continue
+			latin_name, english_name = model_label.split('_', 1)
 
-				latin_name, english_name = model_label.split('_', 1)
+			is_bird = model_label not in non_bird_labels
+			is_human = english_name.startswith('Human')
 
-				is_bird = model_label not in non_bird_labels
-				is_human = model_label.startswith('Human ')
+			self.model_labels[index] = (latin_name, english_name, is_bird, is_human)
 
-				self.model_labels[index] = (latin_name, english_name, is_bird, is_human)
+		# If all of the exclude_labels were valid, we should have none left
 
-			# If all of the exclude_labels were valid, we should have none left
+		num_exclude_labels = len(exclude_labels)
 
-			num_exclude_labels = len(exclude_labels)
+		if num_exclude_labels:
+			logger.info('Exclusion filter contains %d invalid item%s, which were not found in the source labels file' % (num_exclude_labels, '' if num_exclude_labels == 1 else 's'))
 
-			if num_exclude_labels:
-				logger.info('Exclusion filter contains %d invalid item%s, which were not found in the source labels file' % (num_exclude_labels, '' if num_exclude_labels == 1 else 's'))
+		num_imported_labels = len(self.model_labels)
 
-			num_imported_labels = len(self.model_labels)
+		logger.info('Imported %s label%s' % (num_imported_labels, '' if num_imported_labels == 1 else 's'))
 
-			logger.info('Imported %s label%s' % (num_imported_labels, '' if num_imported_labels == 1 else 's'))
+	def _save_wav (self, file_path:str, analysis_buffer:numpy.ndarray, samplerate:int = 48000) -> None:
 
-			return True
-
-		except Exception as e:
-
-			logger.critical('Something went wrong loading the labels: %s' % (e))
-
-		return False
-
-	def save_wav (self, file_path:str, analysis_buffer:numpy.ndarray, samplerate:int=48000):
+		"""Save the analysis buffer as a 16-bit PCM WAV file."""
 
 		# Convert float32 [-1.0, 1.0] to int16
 		audio_int16 = numpy.clip(analysis_buffer * 32767, -32768, 32767).astype('<i2')
@@ -254,7 +227,9 @@ class Listener:
 
 			wf.writeframes(audio_int16.tobytes())
 
-	def birdcatcher (self, analysis_buffer:numpy.ndarray):
+	def birdcatcher (self, analysis_buffer:numpy.ndarray) -> None:
+
+		"""Run inference on the analysis buffer and invoke the callback with any detections."""
 
 		with self.lock:
 
@@ -296,12 +271,12 @@ class Listener:
 				latin, english, is_bird, is_human = self.model_labels[index]
 				detections.append(Detection(index, english, latin, is_bird, is_human, confidences[index]))
 
-			if self.callback_function:
+			if self.callback_function and detections:
 
 				if self.audio_output_dir:
 
-					wav_file_path = self.audio_output_dir + '/' + time.strftime('%Y%m%d-%H%M%S') + '.wav'
-					self.save_wav(file_path=wav_file_path, analysis_buffer=analysis_buffer, samplerate=self.sample_rate_hz)
+					wav_file_path = os.path.join(self.audio_output_dir, time.strftime('%Y%m%d-%H%M%S') + '.wav')
+					self._save_wav(file_path=wav_file_path, analysis_buffer=analysis_buffer, samplerate=self.sample_rate_hz)
 
 				else:
 
@@ -313,10 +288,12 @@ class Listener:
 
 			logger.debug('Analysis took %0.2f seconds' % (end_time-start_time))
 
-	async def listen (self):
+	async def listen (self) -> None:
+
+		"""Continuously capture audio and run detection on each analysis window."""
 
 		loop = asyncio.get_running_loop()
-		queue = asyncio.Queue()
+		queue:asyncio.Queue[numpy.ndarray] = asyncio.Queue()
 
 		def callback (indata, frames, time, status):
 
@@ -362,13 +339,11 @@ class Listener:
 
 				peak_dbfs = self.get_dbfs_peak(analysis_buffer)
 
-				# logger.debug('Peak dBFS: %0.2f', peak_dbfs)
-
 				if self.silence_threshold_dbfs and (peak_dbfs < self.silence_threshold_dbfs):
 					logger.debug('Ignoring silent chunk')
 					continue
 
-				loop.run_in_executor(None, self.birdcatcher, analysis_buffer.copy())
+				await loop.run_in_executor(None, self.birdcatcher, analysis_buffer.copy())
 
 		except KeyboardInterrupt:
 

@@ -1,10 +1,11 @@
 import asyncio
 import importlib
 import os
+import typing
 
-from birdnetpy.core import Listener, Detection
+import birdnetpy.core
 
-def example_callback (detections:list[Detection], wav_file_path:str=None):
+def example_callback (detections:typing.List[birdnetpy.core.Detection], wav_file_path:typing.Optional[str] = None) -> None:
 
 	"""
 	This function will be called when items are detected.
@@ -23,21 +24,19 @@ def example_callback (detections:list[Detection], wav_file_path:str=None):
 
 		os.remove(wav_file_path)
 
-async def main ():
+async def main () -> None:
 
-	# Initialize a listener
+	"""Initialize a listener and start detecting."""
 
 	non_uk_label_file_path = str(importlib.resources.files("birdnetpy") / "labels_filter_non_uk.txt")
 
-	listener = Listener(
+	listener = birdnetpy.core.Listener(
 		match_threshold = 0.8,
 		silence_threshold_dbfs = -60.0,
 		callback_function = example_callback,
 		audio_output_dir = '/tmp',
 		exclude_label_file_path = non_uk_label_file_path
 	)
-
-	# Listen :)
 
 	await listener.listen()
 

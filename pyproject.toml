@@ -13,9 +13,15 @@ authors = [{name="Simon Holliday", email="si@untitledwork.com"}]
 
 dependencies = [
 	"librosa",
+	"numba",
 	"numpy<2",
 	"sounddevice",
 	"tflite-runtime",
+]
+
+[project.optional-dependencies]
+dev = [
+	"mypy==1.15.0",
 ]
 
 [tool.setuptools]
@@ -30,6 +36,9 @@ birdnetpy = [
 	"birdnet/*.txt",
 	"*.txt",
 ]
+
+[tool.mypy]
+ignore_missing_imports = true
 
 [project.urls]
 Homepage = "https://github.com/simonholliday/BirdNET-Py"
