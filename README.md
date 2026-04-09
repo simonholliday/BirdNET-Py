@@ -52,20 +52,20 @@ pip install -e .
 The fastest way to analyze a recording:
 
 ```bash
-birdnetpy recording.wav --location 51.454,-2.598 --date 2026-04-07
+birdcatcher recording.wav --location 51.454,-2.598 --date 2026-04-07
 ```
 
 Add `--annotate` to export detections for use in other tools:
 
 ```bash
-birdnetpy recording.wav --location 51.454,-2.598 --date 2026-04-07 --annotate audacity
-birdnetpy recording.wav --location 51.454,-2.598 --date 2026-04-07 --annotate raven
-birdnetpy recording.wav --location 51.454,-2.598 --date 2026-04-07 --annotate srt
+birdcatcher recording.wav --location 51.454,-2.598 --date 2026-04-07 --annotate audacity
+birdcatcher recording.wav --location 51.454,-2.598 --date 2026-04-07 --annotate raven
+birdcatcher recording.wav --location 51.454,-2.598 --date 2026-04-07 --annotate srt
 ```
 
 ## Command Line
 
-After installation, the `birdnetpy` command is available for file analysis:
+After installation, the `birdcatcher` command is available for file analysis:
 
 | Option | Description |
 |--------|-------------|
@@ -77,7 +77,7 @@ After installation, the `birdnetpy` command is available for file analysis:
 | `--model-variant VARIANT` | Bundled model variant: `fp16` (default), `fp32`, or `int8` |
 | `--annotate FORMAT` | Write an annotation file alongside the audio (see *Annotations* below) |
 
-For full help: `birdnetpy --help`
+For full help: `birdcatcher --help`
 
 ## Annotations
 

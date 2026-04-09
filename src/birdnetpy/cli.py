@@ -26,7 +26,7 @@ def main () -> None:
 	"""Command-line interface for analyzing audio files with BirdNET-Py."""
 
 	parser = argparse.ArgumentParser(
-		prog = 'birdnetpy',
+		prog = 'birdcatcher',
 		description = 'Identify bird species in audio files using the BirdNET model.'
 	)
 
