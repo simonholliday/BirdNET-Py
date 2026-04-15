@@ -11,6 +11,8 @@ BirdNET-Py is a lightweight Python library and command-line tool for automated b
 - **Batch file analysis** — process recordings in any common audio format (WAV, MP3, FLAC, OGG) at any sample rate, with timecoded results
 - **Geographic and seasonal filtering** — provide latitude, longitude, and date to automatically restrict detections to species expected at your location, using eBird occurrence data
 - **Annotation export** — output detections as Audacity labels, Raven selection tables, Reaper markers, CSV data, or SRT subtitles
+- **Audio filters** — built-in high-pass and low-pass filters to remove wind, traffic, and other noise before detection
+- **Tunable sensitivity** — adjust how selective the detector is, from "find more birds" to "be more certain"
 - **Low resource usage** — optimized for devices like the Raspberry Pi Zero 2; audio files are streamed from disk, not loaded into memory
 - **Simple API** — one class, callback-driven, easy to integrate into larger projects
 
@@ -28,6 +30,7 @@ On Python 3.13, you may also need the Python development headers to compile nump
 
 **Debian / Ubuntu:** `sudo apt-get install python3.13-dev`
 **Fedora / RHEL:** `sudo dnf install python3.13-devel`
+
 You'll also need PortAudio and libsndfile development libraries for audio input and file handling:
 
 **Debian / Ubuntu:**
@@ -97,6 +100,10 @@ After installation, the `birdcatcher` command is available for file analysis:
 | `--model PATH` | Path to a custom TFLite model file |
 | `--model-variant VARIANT` | Bundled model variant: `fp16` (default), `fp32`, or `int8` |
 | `--annotate FORMAT` | Write an annotation file alongside the audio (see *Annotations* below) |
+| `--sensitivity N` | Detection sensitivity, 0.5–1.5 (default 1.0). Lower = more detections, higher = more selective |
+| `--highpass N` | High-pass filter in Hz (default 100). Removes low-frequency noise like wind and traffic |
+| `--lowpass N` | Low-pass filter in Hz (disabled by default). Removes high-frequency noise |
+| `--no-highpass` | Disable the default 100Hz high-pass filter |
 
 For full help: `birdcatcher --help`
 
@@ -236,6 +243,9 @@ if __name__ == '__main__':
 - **latitude** / **longitude**: Coordinates for geographic species filtering. See *Geographic Filtering*.
 - **species_threshold**: Minimum geographic probability to include a species (0–1, default 0.03).
 - **annotate**: Annotation format for file analysis. See *Annotations*.
+- **sensitivity**: Controls how the model's raw scores are converted to confidence values (default 1.0). See *Sensitivity*.
+- **filter_highpass_hz**: High-pass filter frequency in Hz (default 100). See *Audio Filters*.
+- **filter_lowpass_hz**: Low-pass filter frequency in Hz (default None). See *Audio Filters*.
 
 ### Detections
 
@@ -264,6 +274,36 @@ All three accept the same input format (48kHz float32 audio) and produce the sam
 Any common audio format (WAV, MP3, FLAC, OGG, etc.) is supported, at any sample rate or bit depth — audio is automatically resampled to 48kHz as required by the BirdNET model. Files are streamed from disk in small chunks, so memory usage remains low regardless of file size.
 
 The `timecode_s` passed to the callback indicates the midpoint of the 3-second analysis window. This minimises the worst-case timing error to 1.5 seconds, since the model cannot localise the call within the window. For live streaming, `timecode_s` is `None`.
+
+## Sensitivity
+
+The `sensitivity` parameter (default 1.0) controls how the model's raw scores are converted to confidence values. Think of it as a dial between "find more birds" and "be more certain":
+
+- **Lower values** (e.g. 0.75) — more detections, but some may be less certain. Useful if you want to catch quieter or more distant calls.
+- **Default (1.0)** — standard detection behaviour.
+- **Higher values** (e.g. 1.25) — fewer detections, but each one is higher confidence. Useful if you're getting too many false positives.
+
+The range is 0.5 to 1.5. Start with the default and adjust if needed.
+
+## Audio Filters
+
+BirdNET-Py includes optional audio filters that clean up the sound before it reaches the detection model. These can reduce false positives caused by non-bird noise.
+
+**High-pass filter** (default: 100 Hz) — Removes low-frequency sounds like wind, traffic, and air conditioning. These sounds can confuse the model even though no birds sing that low. The default of 100 Hz is safe for all bird species. In noisy environments (near roads, wind turbines), try raising it to 300–500 Hz.
+
+**Low-pass filter** (default: disabled) — Removes high-frequency sounds like electronic interference or insect noise. Disabled by default because bird calls can have high-frequency harmonics that help the model identify species. Enable it (e.g. 15000 Hz) only if you have specific high-frequency noise problems.
+
+To disable the high-pass filter entirely:
+
+```bash
+birdcatcher recording.wav --no-highpass
+```
+
+To add both filters:
+
+```bash
+birdcatcher recording.wav --highpass 500 --lowpass 15000
+```
 
 ## Geographic Filtering
 

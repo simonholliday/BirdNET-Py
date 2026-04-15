@@ -12,6 +12,7 @@ import librosa
 import logging
 import numba
 import numpy
+import scipy.signal
 import sounddevice
 import soundfile
 import ai_edge_litert.interpreter
@@ -48,7 +49,7 @@ class Listener:
 
 	SUPPORTED_ANNOTATIONS = {'audacity', 'csv', 'raven', 'reaper', 'srt'}
 
-	def __init__ (self, match_threshold:float = 0.75, silence_threshold_dbfs:typing.Optional[float] = None, callback_function:typing.Optional[typing.Callable] = None, audio_output_dir:typing.Optional[str] = None, exclude_label_file_path:typing.Optional[str] = None, model_file_path:typing.Optional[str] = None, latitude:typing.Optional[float] = None, longitude:typing.Optional[float] = None, species_threshold:float = 0.03, annotate:typing.Optional[str] = None) -> None:
+	def __init__ (self, match_threshold:float = 0.75, silence_threshold_dbfs:typing.Optional[float] = None, callback_function:typing.Optional[typing.Callable] = None, audio_output_dir:typing.Optional[str] = None, exclude_label_file_path:typing.Optional[str] = None, model_file_path:typing.Optional[str] = None, latitude:typing.Optional[float] = None, longitude:typing.Optional[float] = None, species_threshold:float = 0.03, annotate:typing.Optional[str] = None, sensitivity:float = 1.0, filter_highpass_hz:typing.Optional[int] = 100, filter_lowpass_hz:typing.Optional[int] = None) -> None:
 
 		"""
 		match_threshold: The lowest confidence level we want to see matches for (between 0 and 1).
@@ -60,13 +61,42 @@ class Listener:
 		latitude: Optional latitude for geographic species filtering. Must be provided together with longitude.
 		longitude: Optional longitude for geographic species filtering. Must be provided together with latitude.
 		species_threshold: Minimum probability from the geographic model to include a species (default 0.03). Only used when latitude and longitude are provided.
-		annotate: Optional annotation format for file analysis. Supported: 'audacity' (creates a label track .txt file alongside the audio file). More formats may be added in future.
+		annotate: Optional annotation format for file analysis. Supported formats: audacity, csv, raven, reaper, srt.
+		sensitivity: Controls how the model's raw scores are converted to confidence values (default 1.0, range 0.5–1.5). Lower values produce more detections at lower confidence; higher values produce fewer but higher-confidence detections.
+		filter_highpass_hz: High-pass filter frequency in Hz (default 100). Removes low-frequency noise such as wind and traffic. Set to None to disable.
+		filter_lowpass_hz: Low-pass filter frequency in Hz (default None, disabled). Can be set to e.g. 15000 to remove high-frequency noise from electronics or insects.
 		"""
 
 		if annotate and annotate not in self.SUPPORTED_ANNOTATIONS:
 			raise ValueError('Unsupported annotation format: %s (supported: %s)' % (annotate, ', '.join(sorted(self.SUPPORTED_ANNOTATIONS))))
 
 		self.annotate = annotate
+		self.sensitivity = sensitivity
+
+		# Design audio filters (Butterworth, 4th order = 24dB/octave rolloff)
+
+		self._filter_sos:typing.Optional[numpy.ndarray] = None
+
+		sos_sections = []
+
+		if filter_highpass_hz:
+			sos_sections.append(scipy.signal.butter(4, filter_highpass_hz, btype='high', fs=48000, output='sos'))
+
+		if filter_lowpass_hz:
+			sos_sections.append(scipy.signal.butter(4, filter_lowpass_hz, btype='low', fs=48000, output='sos'))
+
+		if sos_sections:
+			self._filter_sos = numpy.vstack(sos_sections)
+
+			filters = []
+
+			if filter_highpass_hz:
+				filters.append('high-pass %dHz' % filter_highpass_hz)
+
+			if filter_lowpass_hz:
+				filters.append('low-pass %dHz' % filter_lowpass_hz)
+
+			logger.info('Audio filter: %s' % ', '.join(filters))
 
 		self.lock = threading.Lock()
 
@@ -441,6 +471,14 @@ class Listener:
 
 		annotation_file.flush()
 
+	def _apply_filters (self, chunk:numpy.ndarray) -> numpy.ndarray:
+		"""Apply the configured audio filters to a chunk. Returns the filtered chunk."""
+
+		if self._filter_sos is not None:
+			return scipy.signal.sosfilt(self._filter_sos, chunk).astype(numpy.float32)
+
+		return chunk
+
 	def birdcatcher (self, analysis_buffer:numpy.ndarray, timecode_s:typing.Optional[float] = None) -> None:
 
 		"""
@@ -464,7 +502,10 @@ class Listener:
 			# Avoid triggering the same identification on successive windows, since windows overlap.
 			max_last_detection_timestamp = current_timestamp - self.window_size_s
 
-			input_data = numpy.expand_dims(analysis_buffer, axis=0)
+			# Apply audio filters before inference
+			filtered = self._apply_filters(analysis_buffer)
+
+			input_data = numpy.expand_dims(filtered, axis=0)
 
 			self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
 			self.interpreter.invoke()
@@ -472,7 +513,7 @@ class Listener:
 			output_data = self.interpreter.get_tensor(self.output_details[0]['index'])
 
 			logits = numpy.squeeze(output_data)
-			confidences = self._custom_sigmoid(logits)
+			confidences = self._custom_sigmoid(logits, self.sensitivity)
 
 			indices = numpy.where(confidences >= self.match_threshold)[0]
 

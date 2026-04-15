@@ -38,6 +38,10 @@ def main () -> None:
 	parser.add_argument('--model', help='Path to a custom TFLite model file')
 	parser.add_argument('--model-variant', choices=sorted(MODEL_VARIANTS.keys()), help='Bundled model variant to use (default fp16)')
 	parser.add_argument('--annotate', choices=sorted(birdnetpy.core.Listener.SUPPORTED_ANNOTATIONS), help='Write annotation file alongside the audio (e.g. audacity)')
+	parser.add_argument('--sensitivity', type=float, default=1.0, help='Detection sensitivity (0.5-1.5, default 1.0). Lower values find more birds at lower confidence; higher values are more selective')
+	parser.add_argument('--highpass', type=int, default=100, help='High-pass filter frequency in Hz (default 100). Removes low-frequency noise like wind and traffic')
+	parser.add_argument('--lowpass', type=int, default=None, help='Low-pass filter frequency in Hz (disabled by default). Set to e.g. 15000 to remove high-frequency noise')
+	parser.add_argument('--no-highpass', action='store_true', help='Disable the default 100Hz high-pass filter')
 
 	args = parser.parse_args()
 
@@ -82,6 +86,11 @@ def main () -> None:
 	if args.model_variant:
 		model_file_path = str(importlib.resources.files("birdnetpy.birdnet") / MODEL_VARIANTS[args.model_variant])
 
+	# Resolve filter settings
+
+	filter_highpass_hz = None if args.no_highpass else args.highpass
+	filter_lowpass_hz = args.lowpass
+
 	# Create listener and analyze
 
 	listener = birdnetpy.core.Listener(
@@ -91,7 +100,10 @@ def main () -> None:
 		latitude = latitude,
 		longitude = longitude,
 		species_threshold = args.species_threshold,
-		annotate = args.annotate
+		annotate = args.annotate,
+		sensitivity = args.sensitivity,
+		filter_highpass_hz = filter_highpass_hz,
+		filter_lowpass_hz = filter_lowpass_hz
 	)
 
 	listener.analyze_file(args.file_path, analysis_date=analysis_date)
