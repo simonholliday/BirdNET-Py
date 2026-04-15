@@ -23,10 +23,26 @@ BirdNET-Py is designed for wildlife researchers, citizen scientists, conservatio
 ### Prerequisites
 
 This project requires Python ≥3.9.
-You'll also need the PortAudio development headers for audio input:
+You'll also need PortAudio and libsndfile development libraries for audio input and file handling:
 
+**Debian / Ubuntu:**
 ```bash
-sudo apt-get install portaudio19-dev
+sudo apt-get install portaudio19-dev libsndfile1-dev
+```
+
+**Fedora / RHEL:**
+```bash
+sudo dnf install portaudio-devel libsndfile-devel
+```
+
+**Arch Linux:**
+```bash
+sudo pacman -S portaudio libsndfile
+```
+
+**macOS:**
+```bash
+brew install portaudio libsndfile
 ```
 
 ### Install with pip
