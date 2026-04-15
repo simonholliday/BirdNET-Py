@@ -22,7 +22,12 @@ BirdNET-Py is designed for wildlife researchers, citizen scientists, conservatio
 
 ### Prerequisites
 
-This project requires Python ≥3.9.
+This project requires Python ≥3.9 and, at the time of writing, <3.14 (the `ai-edge-litert` runtime does not yet support Python 3.14).
+
+On Python 3.13, you may also need the Python development headers to compile numpy from source:
+
+**Debian / Ubuntu:** `sudo apt-get install python3.13-dev`
+**Fedora / RHEL:** `sudo dnf install python3.13-devel`
 You'll also need PortAudio and libsndfile development libraries for audio input and file handling:
 
 **Debian / Ubuntu:**
