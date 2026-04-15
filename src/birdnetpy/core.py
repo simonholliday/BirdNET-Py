@@ -6,16 +6,17 @@ warnings.filterwarnings("ignore", message='The value of the smallest subnormal*'
 
 import asyncio
 import collections
+import csv
 import datetime
 import importlib
 import librosa
 import logging
 import numba
 import numpy
+import ai_edge_litert.interpreter
 import scipy.signal
 import sounddevice
 import soundfile
-import ai_edge_litert.interpreter
 import threading
 import time
 import typing
@@ -71,6 +72,10 @@ class Listener:
 			raise ValueError('Unsupported annotation format: %s (supported: %s)' % (annotate, ', '.join(sorted(self.SUPPORTED_ANNOTATIONS))))
 
 		self.annotate = annotate
+
+		if not 0.5 <= sensitivity <= 1.5:
+			raise ValueError('Sensitivity must be between 0.5 and 1.5 (got %s)' % sensitivity)
+
 		self.sensitivity = sensitivity
 
 		# Design audio filters (Butterworth, 4th order = 24dB/octave rolloff)
@@ -390,7 +395,8 @@ class Listener:
 		# Write headers for formats that need them
 
 		if self.annotate == 'csv':
-			f.write('start_s,end_s,english_name,latin_name,confidence\n')
+			self._csv_writer = csv.writer(f)
+			self._csv_writer.writerow(['start_s', 'end_s', 'english_name', 'latin_name', 'confidence'])
 
 		elif self.annotate == 'raven':
 			f.write('Selection\tView\tChannel\tBegin Time (s)\tEnd Time (s)\tLow Freq (Hz)\tHigh Freq (Hz)\tAnnotation\n')
@@ -439,7 +445,13 @@ class Listener:
 
 			for detection in detections:
 
-				annotation_file.write('%f,%f,%s,%s,%.2f\n' % (window_start, window_end, detection.english_name, detection.latin_name, detection.confidence))
+				self._csv_writer.writerow([
+					'%f' % window_start,
+					'%f' % window_end,
+					detection.english_name,
+					detection.latin_name,
+					'%.2f' % detection.confidence
+				])
 
 		elif self.annotate == 'raven':
 

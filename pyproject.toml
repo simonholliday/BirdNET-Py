@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "setuptools-scm>=8.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "birdnetpy"
-version = "0.1.6"
 description = "A lightweight Python library for identifying bird species from live audio or pre-recorded files using the BirdNET model."
+dynamic = ["version"]
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.9,<3.14"
@@ -22,6 +22,7 @@ dependencies = [
 	"librosa",
 	"numba",
 	"numpy<2",
+	"scipy",
 	"sounddevice",
 	"soundfile",
 	"ai-edge-litert",
@@ -47,6 +48,9 @@ birdnetpy = [
 	"birdnet/*.txt",
 	"*.txt",
 ]
+
+[tool.setuptools_scm]
+# Version is derived automatically from git tags (e.g. v0.2.0)
 
 [tool.mypy]
 ignore_missing_imports = true
