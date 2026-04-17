@@ -1,4 +1,4 @@
-[![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 # BirdNET-Py
 
 **Free, open-source bird species identification for Python — powered by the BirdNET machine learning model.**
@@ -327,9 +327,12 @@ Both filtering methods can be combined — the exclusion file is applied first, 
 
 ## Licence
 
-This project is released under [CC BY-NC-SA 4.0](LICENSE).
+BirdNET-Py is dual-licensed:
 
-See https://creativecommons.org/licenses/by-nc-sa/4.0/ for a human-readable summary.
+- The Python source code and documentation in this repository are released under the [MIT Licence](LICENSE) — permissive, reuse them freely.
+- The bundled BirdNET model files and species label file (listed in *Attribution* below) are redistributed unmodified from upstream and remain under [CC BY-NC-SA 4.0](LICENSE-MODELS). That licence is non-commercial and share-alike — see https://creativecommons.org/licenses/by-nc-sa/4.0/ for a human-readable summary.
+
+Because the release bundle includes those model files, anyone who redistributes BirdNET-Py as-is must continue to comply with CC BY-NC-SA 4.0 for the bundled files. If you want to use BirdNET-Py's code under purely MIT terms, replace the bundled models with your own.
 
 ## Attribution
 
@@ -341,7 +344,7 @@ This project includes *unmodified* files from the [BirdNET-Analyzer](https://git
 - `birdnet/BirdNET_GLOBAL_6K_V2.4_MData_Model_V2_FP16.tflite`
 - `birdnet/labels_en.txt`
 
-These files are provided under the terms of the [CC BY-NC-SA 4.0 licence](https://creativecommons.org/licenses/by-nc-sa/4.0/).
+These files are provided under the terms of the [CC BY-NC-SA 4.0 licence](LICENSE-MODELS).
 
 ## Disclaimer
 
