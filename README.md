@@ -20,6 +20,23 @@ BirdNET-Py is a lightweight Python library and command-line tool for automated b
 
 BirdNET-Py is designed for wildlife researchers, citizen scientists, conservation projects, and hobbyists who want to identify birds from audio recordings or live microphone input. It is free for non-commercial use and intended to support biodiversity monitoring, ecological surveys, and ornithological research.
 
+## Contents
+
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Command Line](#command-line)
+- [Annotations](#annotations)
+- [Python API](#python-api)
+- [Model Variants](#model-variants)
+- [File Analysis](#file-analysis)
+- [Sensitivity](#sensitivity)
+- [Audio Filters](#audio-filters)
+- [Geographic Filtering](#geographic-filtering)
+- [Exclusion File Filtering](#exclusion-file-filtering)
+- [Licence](#licence)
+- [Attribution](#attribution)
+- [Disclaimer](#disclaimer)
+
 ## Installation
 
 ### Prerequisites
