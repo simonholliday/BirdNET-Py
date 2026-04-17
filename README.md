@@ -65,10 +65,16 @@ pip install .
 
 This will install the package and its dependencies as defined in `pyproject.toml`.
 
-If you plan to contribute or make changes to the code, you may prefer an **editable install**:
+If you plan to contribute or make changes to the code, you may prefer an **editable install** with the dev extras (adds `pytest` and `mypy`):
 
 ```bash
-pip install -e .
+pip install -e ".[dev]"
+```
+
+Run the test suite from the repository root:
+
+```bash
+pytest
 ```
 
 ## Quick Start
