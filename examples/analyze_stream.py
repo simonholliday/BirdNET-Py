@@ -1,11 +1,10 @@
 import asyncio
 import logging
-import os
 import typing
 
-logging.basicConfig(level=logging.INFO)
-
 import birdnetpy.core
+
+logging.basicConfig(level=logging.INFO)
 
 def on_detection (detections:typing.List[birdnetpy.core.Detection], wav_file_path:typing.Optional[str] = None, timecode_s:typing.Optional[float] = None) -> None:
 
@@ -13,9 +12,6 @@ def on_detection (detections:typing.List[birdnetpy.core.Detection], wav_file_pat
 
 	for detection in detections:
 		print('%s (%.0f%%)' % (detection.english_name, 100 * detection.confidence))
-
-	if wav_file_path and os.path.isfile(wav_file_path):
-		os.remove(wav_file_path)
 
 async def main () -> None:
 

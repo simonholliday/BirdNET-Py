@@ -3,9 +3,9 @@ import logging
 import sys
 import typing
 
-logging.basicConfig(level=logging.INFO)
-
 import birdnetpy.core
+
+logging.basicConfig(level=logging.INFO)
 
 def on_detection (detections:typing.List[birdnetpy.core.Detection], wav_file_path:typing.Optional[str] = None, timecode_s:typing.Optional[float] = None) -> None:
 

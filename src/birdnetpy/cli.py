@@ -1,6 +1,6 @@
 import argparse
 import datetime
-import importlib
+import importlib.resources
 import logging
 import typing
 

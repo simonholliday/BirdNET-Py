@@ -1,3 +1,7 @@
+# os and warnings are imported first so TensorFlow log suppression and the
+# numpy subnormal-warning filter are in effect before any heavy dependency
+# (ai_edge_litert, librosa, numpy, ...) is imported below.
+
 import os
 import warnings
 
@@ -8,19 +12,20 @@ import asyncio
 import collections
 import csv
 import datetime
-import importlib
-import librosa
+import importlib.resources
 import logging
-import numba
-import numpy
-import ai_edge_litert.interpreter
-import scipy.signal
-import sounddevice
-import soundfile
 import threading
 import time
 import typing
 import wave
+
+import ai_edge_litert.interpreter
+import librosa
+import numba
+import numpy
+import scipy.signal
+import sounddevice
+import soundfile
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +55,7 @@ class Listener:
 
 	SUPPORTED_ANNOTATIONS = {'audacity', 'csv', 'raven', 'reaper', 'srt'}
 
-	def __init__ (self, match_threshold:float = 0.75, silence_threshold_dbfs:typing.Optional[float] = None, callback_function:typing.Optional[typing.Callable] = None, audio_output_dir:typing.Optional[str] = None, exclude_label_file_path:typing.Optional[str] = None, model_file_path:typing.Optional[str] = None, latitude:typing.Optional[float] = None, longitude:typing.Optional[float] = None, species_threshold:float = 0.03, annotate:typing.Optional[str] = None, sensitivity:float = 1.0, filter_highpass_hz:typing.Optional[int] = 100, filter_lowpass_hz:typing.Optional[int] = None) -> None:
+	def __init__ (self, match_threshold:float = 0.8, silence_threshold_dbfs:typing.Optional[float] = None, callback_function:typing.Optional[typing.Callable] = None, audio_output_dir:typing.Optional[str] = None, exclude_label_file_path:typing.Optional[str] = None, model_file_path:typing.Optional[str] = None, latitude:typing.Optional[float] = None, longitude:typing.Optional[float] = None, species_threshold:float = 0.03, annotate:typing.Optional[str] = None, sensitivity:float = 1.0, filter_highpass_hz:typing.Optional[int] = 100, filter_lowpass_hz:typing.Optional[int] = None) -> None:
 
 		"""
 		match_threshold: The lowest confidence level we want to see matches for (between 0 and 1).
@@ -58,7 +63,7 @@ class Listener:
 		callback_function: This function will be called any time one or more bird is detected in an audio chunk. It should accept three arguments: a list of Detection objects, a wav file path (or None), and a timecode in seconds (or None for live streaming).
 		audio_output_dir: An optional directory to store the analyzed audio when there are detections. Omit or specify `None` if you don't want to keep the audio.
 		exclude_label_file_path: An optional path to a list of labels which will be excluded from detection.
-		model_file_path: An optional path to a TFLite model file. Three variants are bundled: FP32 (highest accuracy, ~50MB), FP16 (default, good balance, ~25MB), and INT8 (smallest, ~39MB). If omitted, the bundled FP16 model is used.
+		model_file_path: An optional path to a TFLite model file. Three variants are bundled: FP32 (highest accuracy, ~50MB), FP16 (default, good balance, ~25MB), and INT8 (~39MB, suited to edge-device inference). If omitted, the bundled FP16 model is used.
 		latitude: Optional latitude for geographic species filtering. Must be provided together with longitude.
 		longitude: Optional longitude for geographic species filtering. Must be provided together with latitude.
 		species_threshold: Minimum probability from the geographic model to include a species (default 0.03). Only used when latitude and longitude are provided.
@@ -177,17 +182,12 @@ class Listener:
 		if self.latitude is None:
 			logger.warning('No latitude/longitude provided — geographic filtering is disabled, all species are candidates')
 
-		# Load the audio model
+		# The audio model is loaded lazily on first use. This avoids loading
+		# it twice on startup when a geographic filter refresh is also needed
+		# (the refresh unloads the audio model to stay within a single-model
+		# memory budget on small devices).
 
 		logger.info('Using model: %s' % (os.path.basename(self._model_file_path)))
-		self._load_model(self._model_file_path)
-
-		# Validate that the model output dimension matches the label count
-
-		output_classes = self.output_details[0]['shape'][1]
-
-		if output_classes != self.num_source_labels:
-			logger.warning('Model output size (%d) does not match label count (%d)' % (output_classes, self.num_source_labels))
 
 	def _load_model (self, file_path:str) -> None:
 
@@ -195,10 +195,17 @@ class Listener:
 
 		logger.debug('Loading model')
 
-		self.interpreter = ai_edge_litert.interpreter.Interpreter(model_path=file_path, experimental_delegates=None)
+		self.interpreter = ai_edge_litert.interpreter.Interpreter(model_path=file_path)
 		self.interpreter.allocate_tensors()
 		self.input_details = self.interpreter.get_input_details()
 		self.output_details = self.interpreter.get_output_details()
+
+		# Validate that the model output dimension matches the label count
+
+		output_classes = self.output_details[0]['shape'][1]
+
+		if output_classes != self.num_source_labels:
+			logger.warning('Model output size (%d) does not match label count (%d)' % (output_classes, self.num_source_labels))
 
 	@staticmethod
 	def _date_to_week (d:datetime.date) -> int:
@@ -235,7 +242,7 @@ class Listener:
 
 		logger.info('Loading geographic model for lat=%.2f, lon=%.2f, week=%d' % (lat, lon, week))
 
-		geo_interpreter = ai_edge_litert.interpreter.Interpreter(model_path=geo_model_path, experimental_delegates=None)
+		geo_interpreter = ai_edge_litert.interpreter.Interpreter(model_path=geo_model_path)
 		geo_interpreter.allocate_tensors()
 
 		geo_input = geo_interpreter.get_input_details()[0]
@@ -402,7 +409,8 @@ class Listener:
 			f.write('Selection\tView\tChannel\tBegin Time (s)\tEnd Time (s)\tLow Freq (Hz)\tHigh Freq (Hz)\tAnnotation\n')
 
 		elif self.annotate == 'reaper':
-			f.write('#,Name,Start,End,Length,Color\n')
+			self._csv_writer = csv.writer(f)
+			self._csv_writer.writerow(['#', 'Name', 'Start', 'End', 'Length', 'Color'])
 
 		return f
 
@@ -469,7 +477,14 @@ class Listener:
 			for detection in detections:
 
 				self._annotation_counter += 1
-				annotation_file.write('R%d,%s (%.0f%%),%s,%s,%s,\n' % (self._annotation_counter, detection.english_name, 100 * detection.confidence, start_str, end_str, length_str))
+				self._csv_writer.writerow([
+					'R%d' % self._annotation_counter,
+					'%s (%.0f%%)' % (detection.english_name, 100 * detection.confidence),
+					start_str,
+					end_str,
+					length_str,
+					''
+				])
 
 		elif self.annotate == 'srt':
 
@@ -505,10 +520,13 @@ class Listener:
 
 			current_timestamp = timecode_s if timecode_s is not None else time.time()
 
-			# Refresh the geographic filter every 12 hours for long-running sessions
+			# Refresh the geographic filter every 12 hours for long-running sessions.
+			# The refresh leaves no audio model loaded; the lazy-load block below reloads it.
 			if self.latitude is not None and (current_timestamp - self._geo_last_refreshed) > 43200:
-
 				self._refresh_geo_filter(self._date_to_week(datetime.date.today()))
+
+			# Lazy-load the audio model on first use, and reload it after a geo refresh.
+			if not hasattr(self, 'interpreter'):
 				self._load_model(self._model_file_path)
 
 			# Avoid triggering the same identification on successive windows, since windows overlap.
@@ -603,7 +621,7 @@ class Listener:
 		source_position_s = source_samples_read / source_rate
 		timecode_s = source_position_s - (self.window_size_s / 2)
 
-		if self.silence_threshold_dbfs:
+		if self.silence_threshold_dbfs is not None:
 
 			peak_dbfs = self.get_dbfs_peak(analysis_buffer)
 
@@ -650,9 +668,7 @@ class Listener:
 				week = -1
 
 			if week != self._geo_week:
-
 				self._refresh_geo_filter(week)
-				self._load_model(self._model_file_path)
 
 		# If annotation is enabled, open the file and wrap the callback to write detections as they arrive
 
@@ -756,8 +772,11 @@ class Listener:
 		samples_filled = 0
 		source_samples_read = 0
 
-		# librosa.stream returns blocks at the file's native sample rate
-		for chunk in librosa.stream(file_path, block_length=1, frame_length=self.step_samples, hop_length=self.step_samples, mono=True):
+		# librosa.stream reads in frames of source-rate samples, so the frame
+		# length must be scaled to match step_samples after resampling.
+		source_frame_length = int(self.step_samples * source_rate / self.sample_rate_hz)
+
+		for chunk in librosa.stream(file_path, block_length=1, frame_length=source_frame_length, hop_length=source_frame_length, mono=True):
 
 			# Track samples at the source rate for accurate timecodes
 			source_samples_read += len(chunk)
@@ -824,7 +843,7 @@ class Listener:
 
 				peak_dbfs = self.get_dbfs_peak(analysis_buffer)
 
-				if self.silence_threshold_dbfs and (peak_dbfs < self.silence_threshold_dbfs):
+				if self.silence_threshold_dbfs is not None and (peak_dbfs < self.silence_threshold_dbfs):
 					logger.debug('Ignoring silent chunk')
 					continue
 

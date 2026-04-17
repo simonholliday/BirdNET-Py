@@ -138,12 +138,11 @@ python examples/analyze_stream.py
 ```python
 import asyncio
 import logging
-import os
 import typing
 
-logging.basicConfig(level=logging.INFO)
-
 import birdnetpy.core
+
+logging.basicConfig(level=logging.INFO)
 
 def on_detection (detections:typing.List[birdnetpy.core.Detection], wav_file_path:typing.Optional[str] = None, timecode_s:typing.Optional[float] = None) -> None:
 
@@ -151,9 +150,6 @@ def on_detection (detections:typing.List[birdnetpy.core.Detection], wav_file_pat
 
 	for detection in detections:
 		print('%s (%.0f%%)' % (detection.english_name, 100 * detection.confidence))
-
-	if wav_file_path and os.path.isfile(wav_file_path):
-		os.remove(wav_file_path)
 
 async def main () -> None:
 
@@ -189,9 +185,9 @@ import logging
 import sys
 import typing
 
-logging.basicConfig(level=logging.INFO)
-
 import birdnetpy.core
+
+logging.basicConfig(level=logging.INFO)
 
 def on_detection (detections:typing.List[birdnetpy.core.Detection], wav_file_path:typing.Optional[str] = None, timecode_s:typing.Optional[float] = None) -> None:
 
@@ -234,7 +230,7 @@ if __name__ == '__main__':
 
 ### Parameters
 
-- **match_threshold**: Minimum confidence level for detections (0–1, default 0.75).
+- **match_threshold**: Minimum confidence level for detections (0–1, default 0.8).
 - **silence_threshold_dbfs**: Audio below this level is skipped (dBFS, e.g. -60). Omit for no silence filtering.
 - **callback_function**: Called with each detection. Receives a list of `Detection` objects, an optional WAV file path, and an optional timecode in seconds.
 - **audio_output_dir**: Directory to save the 3-second analysis buffer as a WAV file on each detection. Omit to disable.
